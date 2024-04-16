@@ -1,0 +1,34 @@
+use std::io::{stdin, stdout, BufRead, Write};
+
+#[tokio::main]
+async fn main() {
+    println!("Open the link in your browser");
+    println!("https://auth.gog.com/auth?client_id=46899977096215655&redirect_uri=https://embed.gog.com/on_login_success?origin=client&response_type=code&layout=client2");
+    print!("Paste the authorization code from the resulting url: ");
+    stdout().flush().unwrap();
+    let mut stdin = stdin().lock();
+    let mut code: String = String::new();
+    stdin.read_line(&mut code).expect("Failed to read stdin");
+
+    // Initialize the warp core
+    // This is the top level manager of auth and entry point for communication with GOG
+    let mut core = gog_warp::Core::new();
+    // We can clone the core, they will share the token state
+    let mut core2 = core.clone();
+
+    // Finish the auth flow and get the token
+    core.get_token_with_code(code)
+        .await
+        .expect("Failed to get auth code");
+
+    // A small utility to check if appropriate token is in place
+    assert!(core.ensure_auth().is_ok(), "Login wasn't successful");
+    // This works
+    assert!(core2.ensure_auth().is_ok(), "Login wasn't successful");
+
+    println!("Login success");
+    // Deserialize internal tokens HashMap for storage
+    println!("{}", core.deserialize_tokens().unwrap());
+
+    // Use core.serialize_tokens() to load them in
+}
