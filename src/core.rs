@@ -2,11 +2,12 @@ use crate::auth::get_token_for;
 use crate::auth::types::Token;
 use crate::constants::{GALAXY_CLIENT_ID, GALAXY_CLIENT_SECRET};
 use crate::library::types::GalaxyLibraryItem;
-use crate::{auth, errors};
+use crate::{auth, errors, user};
 use chrono::Utc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::user::types::UserData;
 
 /// Entry point
 #[derive(Clone)]
@@ -65,11 +66,17 @@ impl Core {
         self.ensure_auth()?;
         match self.get_token(client_id) {
             Some(token) => {
+                log::debug!(
+                    "Found token for {}: {}",
+                    client_id,
+                    &token.access_token()[..4]
+                );
                 // Re-use existing token
                 let expires_in: i64 = (*token.expires_in()).into();
                 let current_time = Utc::now().timestamp();
                 let login_time = token.login_time().timestamp();
                 if login_time + expires_in < current_time {
+                    log::debug!("Refreshing token for client {}", client_id);
                     let new_token =
                         get_token_for(&self.reqwest_client, client_id, client_secret, token)
                             .await?;
@@ -83,6 +90,7 @@ impl Core {
                 Ok(token)
             }
             None => {
+                log::debug!("Getting new token for client {}", client_id);
                 // Get new token
                 let galaxy_token = self.get_token(GALAXY_CLIENT_ID).unwrap();
                 let new_token =
@@ -107,6 +115,7 @@ impl Core {
     /// Finishes the auth flow, obtaining the token for Galaxy `CLIENT_ID`
     /// Previously stored tokens will be cleared
     pub async fn get_token_with_code(&self, code: String) -> errors::EmptyResult {
+        log::debug!("Requesting token with code {}", &code[..4]);
         let token = auth::get_token_with_code(&self.reqwest_client, &code).await?;
         let mut tokens = self.tokens.lock();
         tokens.clear();
@@ -125,10 +134,20 @@ impl Core {
 
     /// List of games from all integrations linked to GOG Galaxy
     /// Recommended way to get games after receiving galaxy-library event
+    /// Requires authentication
     pub async fn get_galaxy_library(&self) -> Result<Vec<GalaxyLibraryItem>, errors::Error> {
         self.ensure_auth()?;
         let token = self.obtain_galaxy_token().await?;
+        log::debug!("Getting galaxy library");
         crate::library::get_galaxy_library(&self.reqwest_client, token).await
+    }
+
+    /// Get user and friend information
+    /// Requires authentication
+    pub async fn get_user_data(&self) -> Result<UserData, errors::Error> {
+        self.ensure_auth()?;
+        let token = self.obtain_galaxy_token().await?;
+        user::get_user_data(&self.reqwest_client, token).await
     }
 }
 

@@ -11,6 +11,7 @@ pub(crate) async fn get_owned_licenses(
     client: &Client,
     token: Token,
 ) -> Result<Vec<u64>, crate::Error> {
+    log::debug!("Getting owned licenses");
     let url = format!("{}/user/data/games", GOG_EMBED);
     let mut auth_header =
         HeaderValue::from_str(&format!("Bearer {}", token.access_token())).unwrap();
@@ -32,6 +33,7 @@ async fn get_galaxy_library_page(
 ) -> Result<types::GalaxyLibraryResponse, crate::Error> {
     let url = format!("{}/users/{}/releases", GOG_GALAXY_LIBRARY, token.user_id());
     let mut url = Url::parse(&url).unwrap();
+    log::debug!("Getting galaxy library page with token: {:?}", page_token);
     if let Some(next_page_token) = page_token {
         url.query_pairs_mut()
             .append_pair("page_token", next_page_token);

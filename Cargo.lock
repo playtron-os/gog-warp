@@ -284,6 +284,7 @@ dependencies = [
  "cc",
  "chrono",
  "derive-getters",
+ "log",
  "parking_lot",
  "rand",
  "reqwest",
