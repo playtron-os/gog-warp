@@ -6,6 +6,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 #[derive(Debug)]
 pub enum ErrorKind {
     NotLoggedIn,
+    Unauthorized,
     Json,
     Request,
 }
@@ -32,6 +33,7 @@ impl Display for Error {
         match self.kind {
             ErrorKind::Json => f.write_str("json serialization error"),
             ErrorKind::NotLoggedIn => f.write_str("not logged-in error"),
+            ErrorKind::Unauthorized => f.write_str("token is no longer valid"),
             ErrorKind::Request => f.write_str("network request error"),
         }
     }
@@ -57,6 +59,11 @@ impl std::error::Error for Error {
 pub(crate) fn not_logged_in_error() -> Error {
     Error::new(ErrorKind::NotLoggedIn, None::<BoxError>)
 }
+
+pub(crate) fn unauthorized_error() -> Error {
+    Error::new(ErrorKind::Unauthorized, None::<BoxError>)
+}
+
 pub(crate) fn json_error<E: Into<BoxError>>(err: E) -> Error {
     Error::new(ErrorKind::Json, Some(err))
 }

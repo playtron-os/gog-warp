@@ -19,7 +19,7 @@ fn main() {
         "unsigned long",
         "unsigned long long",
     ] {
-        let def_name = format!("SIZEOF_{}", i.to_uppercase().replace(" ", "_"));
+        let def_name = format!("SIZEOF_{}", i.to_uppercase().replace(' ', "_"));
         defs.push((def_name, check_native_size(i)));
     }
 
@@ -27,7 +27,7 @@ fn main() {
         let mut build = cc::Build::new();
 
         for (key, value) in &defs {
-            build.define(&key, value.as_str());
+            build.define(key, value.as_str());
         }
         build.file("xdelta/xdelta3/xdelta3.c");
         build.warnings(false);
@@ -78,15 +78,15 @@ fn check_native_size(name: &str) -> String {
 
     compile.args(compiler.args()).current_dir(out_dir);
     if compiler.is_like_msvc() {
-        compile.args(&[&test_source_fn, &format!("/Fe{}", test_binary_fn)]);
+        compile.args([&test_source_fn, &format!("/Fe{}", test_binary_fn)]);
     } else {
-        compile.args(&[&test_source_fn, "-o", &test_binary_fn]);
+        compile.args([&test_source_fn, "-o", &test_binary_fn]);
     }
     test_source
         .write_all(test_code.as_bytes())
         .expect("Error writing test compile files");
     drop(test_source); // close the source file, otherwise there will be problems on Windows
-    for &(ref a, ref b) in compiler.env().iter() {
+    for (a, b) in compiler.env().iter() {
         compile.env(a, b);
     }
     compile.output().expect("Error compiling test source");
@@ -99,5 +99,5 @@ fn check_native_size(name: &str) -> String {
         .stdout;
     let output = String::from_utf8(output).expect("Error converting Unicode sequence");
     remove_file(test_binary_fn).ok();
-    return output;
+    output
 }

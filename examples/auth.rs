@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::io::{stdin, stdout, BufRead, Write};
 
 #[tokio::main]
@@ -12,9 +13,9 @@ async fn main() {
 
     // Initialize the warp core
     // This is the top level manager of auth and entry point for communication with GOG
-    let mut core = gog_warp::Core::new();
+    let core = gog_warp::Core::new();
     // We can clone the core, they will share the token state
-    let mut core2 = core.clone();
+    let core2 = core.clone();
 
     // Finish the auth flow and get the token
     core.get_token_with_code(code)
@@ -28,7 +29,10 @@ async fn main() {
 
     println!("Login success");
     // Deserialize internal tokens HashMap for storage
-    println!("{}", core.deserialize_tokens().unwrap());
-
-    // Use core.serialize_tokens() to load them in
+    // For example purposes, let's save the token to cwd
+    let data = core.serialize_tokens().unwrap();
+    let mut file = File::create(".gog.token").expect("Failed to create file");
+    file.write_all(data.as_bytes())
+        .expect("Failed to write data");
+    // Use core.deserialize_tokens() to load them in
 }
