@@ -5,8 +5,12 @@ mod core;
 pub mod errors;
 pub mod library;
 pub mod user;
+pub mod utils;
+
 #[allow(dead_code)]
+#[cfg(feature = "downloader")]
 mod xdelta;
 
 pub use crate::errors::Error;
+pub use content_system::types::Platform;
 pub use core::Core;

@@ -1,15 +1,19 @@
 use crate::auth::get_token_for;
 use crate::auth::types::Token;
 use crate::constants::{GALAXY_CLIENT_ID, GALAXY_CLIENT_SECRET};
+use crate::content_system::types::{Build, BuildResponse, Manifest, Platform};
+use crate::errors::{json_error, maximum_retries_error, zlib_error};
 use crate::library::types::GalaxyLibraryItem;
-use crate::{auth, errors, user};
+use crate::user::types::UserData;
+use crate::{auth, content_system, errors, user};
 use chrono::Utc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::io::Read;
 use std::sync::Arc;
-use crate::user::types::UserData;
 
-/// Entry point
+/// Library entry point  
+/// It's job is to manage authentication and provide nice wrapper arround available endpoints
 #[derive(Clone)]
 pub struct Core {
     tokens: Arc<Mutex<HashMap<String, Token>>>,
@@ -49,7 +53,7 @@ impl Core {
         self.tokens.lock().get(client_id).cloned()
     }
 
-    /// Returns error if
+    /// Returns error if auth galaxy token isn't in store
     pub fn ensure_auth(&self) -> errors::EmptyResult {
         if self.get_token(GALAXY_CLIENT_ID).is_none() {
             return Err(errors::not_logged_in_error());
@@ -105,14 +109,14 @@ impl Core {
         }
     }
 
-    /// Refreshes the main token when needed and returns it
+    /// Refreshes the main token when needed and returns it  
     /// This is basically Core::obtain_token with Galaxy credentials
     pub async fn obtain_galaxy_token(&self) -> Result<Token, errors::Error> {
         self.obtain_token(GALAXY_CLIENT_ID, GALAXY_CLIENT_SECRET)
             .await
     }
 
-    /// Finishes the auth flow, obtaining the token for Galaxy `CLIENT_ID`
+    /// Finishes the auth flow, obtaining the token for [`GALAXY_CLIENT_ID`]  
     /// Previously stored tokens will be cleared
     pub async fn get_token_with_code(&self, code: String) -> errors::EmptyResult {
         log::debug!("Requesting token with code {}", &code[..4]);
@@ -123,8 +127,8 @@ impl Core {
         Ok(())
     }
 
-    /// Get owned products list, includes bundles and DLCs
-    /// Don't use this function when reacting to galaxy-library event
+    /// Get owned products list, includes bundles and DLCs  
+    /// Don't use this function when reacting to galaxy-library event  
     /// Requires authentication
     pub async fn get_owned_products(&self) -> Result<Vec<u64>, errors::Error> {
         self.ensure_auth()?;
@@ -132,8 +136,8 @@ impl Core {
         crate::library::get_owned_licenses(&self.reqwest_client, token).await
     }
 
-    /// List of games from all integrations linked to GOG Galaxy
-    /// Recommended way to get games after receiving galaxy-library event
+    /// List of games from all integrations linked to GOG Galaxy  
+    /// Recommended way to get games after receiving galaxy-library event  
     /// Requires authentication
     pub async fn get_galaxy_library(&self) -> Result<Vec<GalaxyLibraryItem>, errors::Error> {
         self.ensure_auth()?;
@@ -142,12 +146,59 @@ impl Core {
         crate::library::get_galaxy_library(&self.reqwest_client, token).await
     }
 
-    /// Get user and friend information
+    /// Get user and friend information  
     /// Requires authentication
     pub async fn get_user_data(&self) -> Result<UserData, errors::Error> {
         self.ensure_auth()?;
         let token = self.obtain_galaxy_token().await?;
         user::get_user_data(&self.reqwest_client, token).await
+    }
+
+    /// Get available builds from content-system  
+    /// Authorization for this call is optional  
+    ///
+    /// * `password`- allows private branches to be accessed
+    ///
+    /// If the [`BuildResponse::total_count`] is 0, the OS is not supported by the game
+    pub async fn get_builds(
+        &self,
+        product_id: &str,
+        platform: Platform,
+        password: Option<String>,
+    ) -> Result<BuildResponse, errors::Error> {
+        let token: Option<Token> = match self.ensure_auth() {
+            Ok(_) => {
+                let token = self.obtain_galaxy_token().await?;
+                Some(token)
+            }
+            Err(_) => None,
+        };
+
+        content_system::get_builds(&self.reqwest_client, product_id, platform, token, password)
+            .await
+    }
+
+    /// Get manifest for the build obtained with [`Core::get_builds`]
+    pub async fn get_manifest(&self, build: &Build) -> Result<Manifest, errors::Error> {
+        for endpoint in build.urls() {
+            for _retry in 0..3 {
+                let response = self.reqwest_client.get(endpoint.url()).send().await;
+                if let Ok(res) = response {
+                    if res.status().as_u16() != 200 {
+                        break;
+                    }
+                    if let Ok(data) = res.bytes().await {
+                        let mut zlib = flate2::read::ZlibDecoder::new(&data[..]);
+                        let mut buffer = Vec::new();
+                        zlib.read_to_end(&mut buffer).map_err(zlib_error)?;
+                        let manifest: Manifest =
+                            serde_json::from_slice(buffer.as_slice()).map_err(json_error)?;
+                        return Ok(manifest);
+                    }
+                }
+            }
+        }
+        Err(maximum_retries_error())
     }
 }
 

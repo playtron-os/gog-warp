@@ -9,6 +9,8 @@ pub enum ErrorKind {
     Unauthorized,
     Json,
     Request,
+    Zlib,
+    MaximumRetries,
 }
 
 pub struct Error {
@@ -35,6 +37,8 @@ impl Display for Error {
             ErrorKind::NotLoggedIn => f.write_str("not logged-in error"),
             ErrorKind::Unauthorized => f.write_str("token is no longer valid"),
             ErrorKind::Request => f.write_str("network request error"),
+            ErrorKind::MaximumRetries => f.write_str("maximum retries exceeded"),
+            ErrorKind::Zlib => f.write_str("zlib error"),
         }
     }
 }
@@ -64,10 +68,18 @@ pub(crate) fn unauthorized_error() -> Error {
     Error::new(ErrorKind::Unauthorized, None::<BoxError>)
 }
 
+pub(crate) fn maximum_retries_error() -> Error {
+    Error::new(ErrorKind::MaximumRetries, None::<BoxError>)
+}
+
 pub(crate) fn json_error<E: Into<BoxError>>(err: E) -> Error {
     Error::new(ErrorKind::Json, Some(err))
 }
 
 pub(crate) fn request_error<E: Into<BoxError>>(err: E) -> Error {
     Error::new(ErrorKind::Request, Some(err))
+}
+
+pub(crate) fn zlib_error<E: Into<BoxError>>(err: E) -> Error {
+    Error::new(ErrorKind::Zlib, Some(err))
 }
