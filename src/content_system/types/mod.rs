@@ -15,6 +15,7 @@ pub enum Manifest {
 }
 
 impl Manifest {
+    /// Gets game install directory name
     pub fn install_directory(&self) -> String {
         match self {
             Self::V1(mv1) => mv1.product().install_directory().clone(),
@@ -22,6 +23,7 @@ impl Manifest {
         }
     }
 
+    /// Returns languages supported by the build
     pub fn languages(&self) -> Vec<String> {
         let mut manifest_languages: Vec<String> = Vec::new();
         match self {
@@ -30,7 +32,7 @@ impl Manifest {
                     if let v1::ManifestDepot::Files { languages, .. } = depot {
                         let new_languages: Vec<String> = languages
                             .iter()
-                            .filter(|lang| lang.to_lowercase() != "neutral")
+                            .filter(|lang| lang.to_lowercase() != "*")
                             .filter(|lang| !manifest_languages.contains(lang))
                             .map(|lang| lang.clone())
                             .collect();
@@ -53,10 +55,16 @@ impl Manifest {
             }
         }
         manifest_languages
-            .iter()
-            .map(|lang| super::languages::get_language(lang).unwrap())
-            .map(|lang| lang.code.to_string())
-            .collect()
+    }
+
+    /// Returns a tuple of (compressed_size, decompressed_size)  
+    /// This consists of game files alone
+    // TODO: Mention dependencies system
+    pub fn install_size(&self, language: &str) -> (u64, u64) {
+        let mut download_size: u64 = 0;
+        let mut install_size: u64 = 0;
+
+        (download_size, install_size)
     }
 }
 

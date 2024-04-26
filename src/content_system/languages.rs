@@ -1,4 +1,5 @@
 use lazy_static::lazy_static;
+use serde::{Deserialize, Deserializer};
 
 #[derive(Debug, Clone)]
 pub struct Language<'a> {
@@ -524,4 +525,27 @@ pub fn get_language(query: &str) -> Option<Language> {
             lang.code == query || lang.deprecated_codes.contains(&query) || lang.name == query
         })
         .cloned()
+}
+
+pub(crate) fn serde_language<'de, D>(d: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let languages: Vec<String> = Vec::deserialize(d)?;
+    Ok(languages
+        .iter()
+        .map(|lang| {
+            match get_language(lang) {
+                Some(lang) => lang.code,
+                None => {
+                    if lang.to_lowercase() == "neutral" {
+                        "*"
+                    } else {
+                        lang
+                    }
+                }
+            }
+            .to_string()
+        })
+        .collect())
 }

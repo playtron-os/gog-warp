@@ -1,3 +1,4 @@
+use crate::content_system::languages;
 use derive_getters::Getters;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,7 @@ pub struct Manifest {
 pub struct ManifestDepot {
     size: u64,
     compressed_size: u64,
+    #[serde(deserialize_with = "languages::serde_language")]
     languages: Vec<String>,
     manifest: String,
     product_id: String,

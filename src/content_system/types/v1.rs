@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::content_system::languages;
 use derive_getters::Getters;
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +24,7 @@ pub struct ManifestProduct {
 #[serde(untagged)]
 pub enum ManifestDepot {
     Files {
+        #[serde(deserialize_with = "languages::serde_language")]
         languages: Vec<String>,
         size: String,
         #[serde(rename = "gameIDs")]
@@ -38,6 +40,7 @@ pub enum ManifestDepot {
 
 #[derive(Serialize, Deserialize, Getters, Debug)]
 pub struct SupportCommand {
+    #[serde(deserialize_with = "languages::serde_language")]
     languages: Vec<String>,
     executable: String,
     #[serde(rename = "gameID")]
