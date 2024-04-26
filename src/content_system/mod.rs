@@ -5,6 +5,7 @@ use crate::auth::types::Token;
 use crate::constants::domains::GOG_CONTENT_SYSTEM;
 use crate::errors::request_error;
 
+pub mod languages;
 #[cfg(test)]
 mod tests;
 pub mod types;

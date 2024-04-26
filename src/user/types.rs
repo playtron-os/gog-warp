@@ -1,6 +1,7 @@
+use derive_getters::Getters;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct UserData {
     country: String,
@@ -19,19 +20,19 @@ pub struct UserData {
     friends: Vec<UserDataFriend>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug)]
 pub struct Currency {
     code: String,
     symbol: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug)]
 pub struct Language {
     code: String,
     name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug)]
 pub struct UserDataChecksums {
     cart: Option<String>,
     games: Option<String>,
@@ -40,7 +41,7 @@ pub struct UserDataChecksums {
     games_rating: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct UserDataUpdates {
     messages: u32,
@@ -51,7 +52,7 @@ pub struct UserDataUpdates {
     total: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct UserDataFriend {
     username: String,

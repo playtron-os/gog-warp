@@ -14,6 +14,52 @@ pub enum Manifest {
     V2(v2::Manifest),
 }
 
+impl Manifest {
+    pub fn install_directory(&self) -> String {
+        match self {
+            Self::V1(mv1) => mv1.product().install_directory().clone(),
+            Self::V2(mv2) => mv2.install_directory().clone(),
+        }
+    }
+
+    pub fn languages(&self) -> Vec<String> {
+        let mut manifest_languages: Vec<String> = Vec::new();
+        match self {
+            Self::V1(mv1) => {
+                for depot in mv1.product().depots() {
+                    if let v1::ManifestDepot::Files { languages, .. } = depot {
+                        let new_languages: Vec<String> = languages
+                            .iter()
+                            .filter(|lang| lang.to_lowercase() != "neutral")
+                            .filter(|lang| !manifest_languages.contains(lang))
+                            .map(|lang| lang.clone())
+                            .collect();
+
+                        manifest_languages.extend(new_languages);
+                    }
+                }
+            }
+            Self::V2(mv2) => {
+                for depot in mv2.depots() {
+                    let new_languages: Vec<String> = depot
+                        .languages()
+                        .iter()
+                        .filter(|lang| lang.as_str() != "*")
+                        .filter(|lang| !manifest_languages.contains(lang))
+                        .map(|lang| lang.clone())
+                        .collect();
+                    manifest_languages.extend(new_languages);
+                }
+            }
+        }
+        manifest_languages
+            .iter()
+            .map(|lang| super::languages::get_language(lang).unwrap())
+            .map(|lang| lang.code.to_string())
+            .collect()
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
@@ -63,4 +109,10 @@ pub struct Endpoint {
     max_fails: u32,
     supports_generation: Vec<u32>,
     fallback_only: bool,
+}
+
+#[derive(Serialize, Deserialize, Getters, Debug)]
+pub struct SizeInfo {
+    disk_size: u64,
+    download_size: u64,
 }

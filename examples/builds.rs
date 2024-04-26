@@ -1,4 +1,4 @@
-use gog_warp::content_system::types::{BuildResponse, Manifest, Platform};
+use gog_warp::content_system::types::{BuildResponse, Platform};
 
 fn list_builds(name: &str, builds: &BuildResponse) {
     println!("Listing available builds for {}", name);
@@ -18,11 +18,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Init core
     let core = gog_warp::Core::new();
 
-    let bg3_builds = core
-        .get_builds("1456460669", Platform::Windows, None)
+    let witcher_builds = core
+        .get_builds("1207658924", Platform::Windows, None)
         .await?;
 
-    list_builds("Baldur's Gate 3", &bg3_builds);
+    list_builds("The Witcher", &witcher_builds);
+    let build = witcher_builds
+        .items()
+        .iter()
+        .find(|b| *b.generation() == 1)
+        .expect("No v1 builds");
+    let manifest = core
+        .get_manifest(&build)
+        .await
+        .expect("Failed to get manifest");
+    println!("Install directory: {}", manifest.install_directory());
+    println!("Languages: {:?}", manifest.languages());
+
     println!("");
 
     let cyberpunk_builds = core
@@ -44,16 +56,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed to get manifest");
 
-    match manifest {
-        Manifest::V1(manifest) => {
-            let install_directory = manifest.product().install_directory();
-            println!("Install directory {}", install_directory);
-        }
-        Manifest::V2(manifest) => {
-            let install_directory = manifest.install_directory();
-            println!("Install directory {}", install_directory);
-        }
-    }
+    let install_dir = manifest.install_directory();
+    println!("Install Dir: {}", install_dir);
+
+    let languages = manifest.languages();
+    println!("Languages: {:?}", languages);
 
     Ok(())
 }

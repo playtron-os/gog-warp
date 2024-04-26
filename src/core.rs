@@ -188,6 +188,11 @@ impl Core {
                         break;
                     }
                     if let Ok(data) = res.bytes().await {
+                        if *build.generation() == 1 {
+                            let manifest: Manifest =
+                                serde_json::from_slice(&data).map_err(json_error)?;
+                            return Ok(manifest);
+                        }
                         let mut zlib = flate2::read::ZlibDecoder::new(&data[..]);
                         let mut buffer = Vec::new();
                         zlib.read_to_end(&mut buffer).map_err(zlib_error)?;

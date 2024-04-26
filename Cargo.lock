@@ -304,6 +304,7 @@ dependencies = [
  "chrono",
  "derive-getters",
  "flate2",
+ "lazy_static",
  "libc",
  "log",
  "parking_lot",
