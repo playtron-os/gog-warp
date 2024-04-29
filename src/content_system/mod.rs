@@ -7,8 +7,8 @@ use crate::errors::request_error;
 
 #[cfg(feature = "downloader")]
 pub mod downloader;
-pub mod patches;
 pub mod languages;
+pub mod patches;
 #[cfg(test)]
 mod tests;
 pub mod types;
