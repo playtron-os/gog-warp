@@ -35,6 +35,10 @@ impl Core {
         }
     }
 
+    pub fn reqwest_client(&self) -> &reqwest::Client {
+        &self.reqwest_client
+    }
+
     pub fn deserialize_tokens(&self, new_tokens: &str) -> errors::EmptyResult {
         let new_tokens: HashMap<String, Token> =
             serde_json::from_str(new_tokens).map_err(errors::json_error)?;
@@ -119,7 +123,7 @@ impl Core {
     /// Finishes the auth flow, obtaining the token for [`GALAXY_CLIENT_ID`]  
     /// Previously stored tokens will be cleared
     pub async fn get_token_with_code(&self, code: String) -> errors::EmptyResult {
-        log::debug!("Requesting token with code {}", &code[..4]);
+        log::debug!("Requesting token with code {}", code);
         let token = auth::get_token_with_code(&self.reqwest_client, &code).await?;
         let mut tokens = self.tokens.lock();
         tokens.clear();
@@ -136,7 +140,7 @@ impl Core {
         crate::library::get_owned_licenses(&self.reqwest_client, token).await
     }
 
-    /// List of games from all integrations linked to GOG Galaxy  
+    /// List of games and DLCs from all integrations linked to GOG Galaxy  
     /// Recommended way to get games after receiving galaxy-library event  
     /// Requires authentication
     pub async fn get_galaxy_library(&self) -> Result<Vec<GalaxyLibraryItem>, errors::Error> {

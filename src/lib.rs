@@ -14,3 +14,6 @@ mod xdelta;
 pub use crate::errors::Error;
 pub use content_system::types::Platform;
 pub use core::Core;
+
+#[cfg(feature = "downloader")]
+pub use content_system::downloader::Downloader;

@@ -18,6 +18,8 @@ pub struct ManifestProduct {
     install_directory: String,
     #[serde(rename = "gameIDs")]
     game_ids: Vec<GameID>,
+    #[serde(rename = "rootGameID")]
+    root_game_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -55,4 +57,37 @@ pub struct GameID {
     game_id: String,
     name: HashMap<String, String>,
     standalone: bool,
+}
+
+#[derive(Serialize, Deserialize, Getters, Debug)]
+pub struct DepotDetails {
+    name: String,
+    depot: Depot,
+}
+
+#[derive(Serialize, Deserialize, Getters, Debug)]
+pub struct Depot {
+    files: Vec<DepotEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum DepotEntry {
+    File(DepotFile),
+    Directory(DepotDirectory),
+}
+
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
+pub struct DepotFile {
+    offset: u64,
+    hash: String,
+    url: String,
+    path: String,
+    size: u64,
+}
+
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
+pub struct DepotDirectory {
+    directory: bool,
+    path: String,
 }

@@ -7,3 +7,4 @@ pub const GOG_CONTENT_SYSTEM: &str = "https://content-system.gog.com";
 pub const GOG_GALAXY_LIBRARY: &str = "https://galaxy-library.gog.com";
 pub const GOG_AUTH: &str = "https://auth.gog.com";
 pub const GOG_AFFILIATE: &str = "https://af.gog.com";
+pub const GOG_CDN: &str = "https://gog-cdn-fastly.gog.com";

@@ -11,6 +11,8 @@ pub enum ErrorKind {
     Request,
     Zlib,
     MaximumRetries,
+    #[cfg(feature = "downloader")]
+    DownloaderBuilder,
 }
 
 pub struct Error {
@@ -39,6 +41,8 @@ impl Display for Error {
             ErrorKind::Request => f.write_str("network request error"),
             ErrorKind::MaximumRetries => f.write_str("maximum retries exceeded"),
             ErrorKind::Zlib => f.write_str("zlib error"),
+            #[cfg(feature = "downloader")]
+            ErrorKind::DownloaderBuilder => f.write_str("builder error, required field missing"),
         }
     }
 }
@@ -66,6 +70,11 @@ pub(crate) fn not_logged_in_error() -> Error {
 
 pub(crate) fn unauthorized_error() -> Error {
     Error::new(ErrorKind::Unauthorized, None::<BoxError>)
+}
+
+#[cfg(feature = "downloader")]
+pub(crate) fn dbuilder_error() -> Error {
+    Error::new(ErrorKind::DownloaderBuilder, None::<BoxError>)
 }
 
 pub(crate) fn maximum_retries_error() -> Error {

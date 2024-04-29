@@ -26,7 +26,7 @@ lazy_static! {
         Language {
             name: "Azeri",
             code: "az-AZ",
-            native_name: "Azərbaycan­ılı",
+            native_name: "Azərbaycan\u{AD}ılı",
             deprecated_codes: vec![]
         },
         Language {

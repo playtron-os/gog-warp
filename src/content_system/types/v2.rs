@@ -21,6 +21,8 @@ pub struct Manifest {
 pub struct ManifestDepot {
     size: u64,
     compressed_size: u64,
+    #[serde(default)]
+    is_gog_depot: bool,
     #[serde(deserialize_with = "languages::serde_language")]
     languages: Vec<String>,
     manifest: String,
@@ -49,7 +51,7 @@ pub struct Depot {
     small_files_container: Option<SmallFilesContainer>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum DepotEntry {
     #[serde(rename = "DepotFile")]
@@ -60,18 +62,18 @@ pub enum DepotEntry {
     Link(DepotLink),
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct DepotDirectory {
     path: String,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct DepotLink {
     path: String,
     target: String,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DepotFile {
     chunks: Vec<Chunk>,
@@ -81,7 +83,7 @@ pub struct DepotFile {
     md5: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Chunk {
     compressed_md5: String,
@@ -90,7 +92,7 @@ pub struct Chunk {
     compressed_size: u64,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct SmallFilesContainerRef {
     offset: u64,
     size: u64,
