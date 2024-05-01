@@ -9,8 +9,8 @@ use crate::{auth, content_system, errors, user};
 use chrono::Utc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::io::Read;
 use std::sync::Arc;
+use tokio::io::AsyncReadExt;
 
 /// Library entry point  
 /// It's job is to manage authentication and provide nice wrapper arround available endpoints
@@ -197,9 +197,10 @@ impl Core {
                                 serde_json::from_slice(&data).map_err(json_error)?;
                             return Ok(manifest);
                         }
-                        let mut zlib = flate2::read::ZlibDecoder::new(&data[..]);
+                        let mut zlib =
+                            async_compression::tokio::bufread::ZlibDecoder::new(&data[..]);
                         let mut buffer = Vec::new();
-                        zlib.read_to_end(&mut buffer).map_err(zlib_error)?;
+                        zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
                         let manifest: Manifest =
                             serde_json::from_slice(buffer.as_slice()).map_err(json_error)?;
                         return Ok(manifest);

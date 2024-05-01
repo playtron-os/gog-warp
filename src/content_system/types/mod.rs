@@ -1,23 +1,37 @@
-use std::{collections::HashMap, fmt::Display, io::Read};
+use std::{collections::HashMap, fmt::Display};
 
+use async_compression::tokio::bufread::ZlibDecoder;
 use chrono::prelude::*;
 use derive_getters::Getters;
-use flate2::read::ZlibDecoder;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncReadExt;
 
 use crate::{
     constants::domains::GOG_CDN,
     errors::{json_error, request_error, zlib_error},
 };
 
+pub(crate) mod traits;
 pub mod v1;
 pub mod v2;
 
-#[derive(Debug)]
+/// Wrapper arround [`Vec<DepotEntry>`] containing depot product_id
+pub type DepotEntries = HashMap<String, Vec<DepotEntry>>;
+
+#[derive(Clone, Debug)]
 pub enum DepotEntry {
     V1(v1::DepotEntry),
     V2(v2::DepotEntry),
+}
+
+impl traits::FilePath for DepotEntry {
+    fn path(&self) -> String {
+        match self {
+            Self::V1(v1) => traits::FilePath::path(v1),
+            Self::V2(v2) => traits::FilePath::path(v2),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -28,6 +42,14 @@ pub enum Manifest {
 }
 
 impl Manifest {
+    /// Returns base game id
+    pub fn product_id(&self) -> String {
+        match self {
+            Self::V1(mv1) => mv1.product().root_game_id().clone(),
+            Self::V2(mv2) => mv2.base_product_id().clone(),
+        }
+    }
+
     /// Gets game install directory name
     pub fn install_directory(&self) -> String {
         match self {
@@ -177,14 +199,14 @@ impl Manifest {
         reqwest_client: &Client,
         language: &String,
         dlcs: I,
-    ) -> Result<Vec<DepotEntry>, crate::Error>
+    ) -> Result<DepotEntries, crate::Error>
     where
         I: IntoIterator<Item = V> + Copy,
         V: AsRef<str>,
     {
         match self {
             Self::V1(mv1) => {
-                let mut files: Vec<DepotEntry> = Vec::new();
+                let mut files: DepotEntries = DepotEntries::new();
                 let root_game_id = mv1.product().root_game_id();
                 for depot in mv1.product().depots() {
                     if let v1::ManifestDepot::Files {
@@ -222,13 +244,20 @@ impl Manifest {
 
                         let json_data: v1::DepotDetails =
                             response.json().await.map_err(request_error)?;
-                        let new_files: Vec<DepotEntry> = json_data
+
+                        let mut new_files: Vec<DepotEntry> = json_data
                             .depot()
                             .files()
                             .iter()
                             .map(|f| DepotEntry::V1(f.clone()))
                             .collect();
-                        files.extend(new_files);
+
+                        let product_files = files.get(game_ids.first().unwrap());
+                        if let Some(pf) = product_files {
+                            new_files.extend(pf.clone());
+                        }
+                        // This hurts my eyes
+                        files.extend([(game_ids.first().unwrap().clone(), new_files)]);
                     }
                 }
 
@@ -236,7 +265,7 @@ impl Manifest {
             }
             Self::V2(mv2) => {
                 let root_game_id = mv2.base_product_id();
-                let mut files = Vec::new();
+                let mut files: DepotEntries = DepotEntries::new();
                 for depot in mv2.depots() {
                     // Check if depot is on wanted DLC list or if it's a base game
                     if depot.product_id() != root_game_id
@@ -265,17 +294,23 @@ impl Manifest {
                     let mut zlib = ZlibDecoder::new(&compressed_manifest[..]);
                     let mut buffer = Vec::new();
 
-                    zlib.read_to_end(&mut buffer).map_err(zlib_error)?;
+                    zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
 
                     let json_data: v2::DepotDetails =
                         serde_json::from_slice(&buffer).map_err(json_error)?;
-                    let new_files: Vec<DepotEntry> = json_data
+                    let mut new_files: Vec<DepotEntry> = json_data
                         .depot()
                         .items()
                         .iter()
                         .map(|f| DepotEntry::V2(f.clone()))
                         .collect();
-                    files.extend(new_files);
+                    // This hurts my eyes
+                    // FIXME: Can we figure out something better for this abomination
+                    let product_files = files.get(depot.product_id());
+                    if let Some(pf) = product_files {
+                        new_files.extend(pf.clone());
+                    }
+                    files.extend([(depot.product_id().clone(), new_files)]);
                 }
                 Ok(files)
             }
@@ -283,7 +318,7 @@ impl Manifest {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
     Windows,
@@ -308,7 +343,7 @@ pub struct BuildResponse {
     items: Vec<Build>,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct Build {
     build_id: String,
     product_id: String,
@@ -322,7 +357,7 @@ pub struct Build {
     urls: Vec<Endpoint>,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct Endpoint {
     endpoint_name: String,
     url: String,
@@ -334,7 +369,7 @@ pub struct Endpoint {
     fallback_only: bool,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct SizeInfo {
     disk_size: u64,
     download_size: u64,

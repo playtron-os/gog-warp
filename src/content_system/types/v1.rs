@@ -77,6 +77,15 @@ pub enum DepotEntry {
     Directory(DepotDirectory),
 }
 
+impl super::traits::FilePath for DepotEntry {
+    fn path(&self) -> String {
+        match self {
+            Self::File(f) => f.path().replace('\\', "/").trim_matches('/').to_string(),
+            Self::Directory(d) => d.path().replace('\\', "/").trim_matches('/').to_string(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct DepotFile {
     offset: u64,

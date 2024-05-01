@@ -8,11 +8,13 @@ pub struct Manifest {
     base_product_id: String,
     client_id: Option<String>,
     client_secret: Option<String>,
+    #[serde(default)]
     dependencies: Vec<String>,
     depots: Vec<ManifestDepot>,
     install_directory: String,
     platform: String,
     products: Vec<ManifestProduct>,
+    script_interpreter: bool,
     tags: Vec<String>,
 }
 
@@ -60,6 +62,23 @@ pub enum DepotEntry {
     Directory(DepotDirectory),
     #[serde(rename = "DepotLink")]
     Link(DepotLink),
+    #[serde(rename = "DepotDiff")]
+    Diff(DepotDiff),
+}
+
+impl super::traits::FilePath for DepotEntry {
+    fn path(&self) -> String {
+        match self {
+            Self::File(f) => f.path().replace('\\', "/").trim_matches('/').to_string(),
+            Self::Directory(d) => d.path().replace('\\', "/").trim_matches('/').to_string(),
+            Self::Link(l) => l.path().replace('\\', "/").trim_matches('/').to_string(),
+            Self::Diff(d) => d
+                .path_source()
+                .replace('\\', "/")
+                .trim_matches('/')
+                .to_string(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
@@ -81,6 +100,16 @@ pub struct DepotFile {
     sfc_ref: Option<SmallFilesContainerRef>,
     sha256: Option<String>,
     md5: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
+pub struct DepotDiff {
+    md5_source: String,
+    md5_target: String,
+    path_source: String,
+    path_target: String,
+    md5: String,
+    chunks: Vec<Chunk>,
 }
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]

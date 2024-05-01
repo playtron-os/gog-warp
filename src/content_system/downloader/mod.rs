@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use crate::{errors::dbuilder_error, Core, Error};
 
@@ -68,6 +68,7 @@ impl Builder {
             verify,
             build_id,
             prev_build_id,
+            diff_reports: Vec::new(),
         })
     }
 
@@ -152,6 +153,7 @@ impl Builder {
     }
 }
 
+/// The main component responsible for downloading game files
 pub struct Downloader {
     /// A warp Core
     core: Core,
@@ -177,6 +179,9 @@ pub struct Downloader {
     support_path: PathBuf,
     /// Whether to verify the files based on the manifest
     verify: bool,
+
+    // Runtime related
+    diff_reports: Vec<diff::DiffReport>,
 }
 
 impl Downloader {
@@ -185,14 +190,14 @@ impl Downloader {
     }
 
     /// Fetches file lists and patches manifest
-    pub async fn prepare(&self) -> Result<(), Error> {
+    pub async fn prepare(&mut self) -> Result<(), Error> {
         // Get files for main manifest
         let new_entries = self
             .manifest
             .get_files(self.core.reqwest_client(), &self.language, &self.dlcs)
             .await?;
 
-        let old_entries = match &self.old_manifest {
+        let mut old_entries = match &self.old_manifest {
             Some(om) => {
                 om.get_files(
                     self.core.reqwest_client(),
@@ -201,8 +206,37 @@ impl Downloader {
                 )
                 .await?
             }
-            None => Vec::new(),
+            None => HashMap::new(),
         };
+
+        let re_used_dlcs: Vec<String> = self
+            .dlcs
+            .iter()
+            .filter(|d| self.old_dlcs.contains(d))
+            .cloned()
+            .collect();
+
+        let patches = super::patches::get_patches(
+            self.core.reqwest_client(),
+            &self.manifest,
+            &self.build_id,
+            &self.old_manifest,
+            self.prev_build_id.clone(),
+            re_used_dlcs,
+            &self.language,
+            &self.old_language,
+        )
+        .await?;
+
+        let mut patches = patches.unwrap_or_else(|| HashMap::new());
+
+        for (p_id, new_entries) in new_entries {
+            let old_entries = old_entries.remove(&p_id).unwrap_or(Vec::new());
+            let patches = patches.remove(&p_id).unwrap_or(Vec::new());
+
+            let report = diff::diff(&p_id, new_entries, old_entries, patches);
+            self.diff_reports.push(report);
+        }
 
         Ok(())
     }
