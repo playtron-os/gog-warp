@@ -1,5 +1,5 @@
 use crate::content_system::languages;
-use derive_getters::Getters;
+use derive_getters::{Dissolve, Getters};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Getters, Debug)]
@@ -21,8 +21,8 @@ pub struct Manifest {
 #[derive(Serialize, Deserialize, Getters, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ManifestDepot {
-    size: u64,
-    compressed_size: u64,
+    size: i64,
+    compressed_size: i64,
     #[serde(default)]
     is_gog_depot: bool,
     #[serde(deserialize_with = "languages::serde_language")]
@@ -40,13 +40,13 @@ pub struct ManifestProduct {
     temp_arguments: String,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DepotDetails {
-    depot: Depot,
+    pub(crate) depot: Depot,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Dissolve, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Depot {
     items: Vec<DepotEntry>,
@@ -100,6 +100,8 @@ pub struct DepotFile {
     sfc_ref: Option<SmallFilesContainerRef>,
     sha256: Option<String>,
     md5: Option<String>,
+    #[serde(default)]
+    flags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
@@ -117,17 +119,17 @@ pub struct DepotDiff {
 pub struct Chunk {
     compressed_md5: String,
     md5: String,
-    size: u64,
-    compressed_size: u64,
+    size: i64,
+    compressed_size: i64,
 }
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct SmallFilesContainerRef {
-    offset: u64,
-    size: u64,
+    offset: i64,
+    size: i64,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct SmallFilesContainer {
     chunks: Vec<Chunk>,
 }

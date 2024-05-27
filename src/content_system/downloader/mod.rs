@@ -1,10 +1,18 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
-use crate::{errors::dbuilder_error, Core, Error};
+use crate::{
+    errors::{dbuilder_error, io_error, not_ready_error},
+    Core, Error,
+};
+
+use tokio::fs;
 
 use super::types::Manifest;
+use super::types::{v1, v2, DepotEntry};
 
+mod allocator;
 mod diff;
+pub mod progress;
 
 #[derive(Default)]
 pub struct Builder {
@@ -68,7 +76,7 @@ impl Builder {
             verify,
             build_id,
             prev_build_id,
-            diff_reports: Vec::new(),
+            download_report: None,
         })
     }
 
@@ -180,8 +188,7 @@ pub struct Downloader {
     /// Whether to verify the files based on the manifest
     verify: bool,
 
-    // Runtime related
-    diff_reports: Vec<diff::DiffReport>,
+    download_report: Option<diff::DiffReport>,
 }
 
 impl Downloader {
@@ -191,22 +198,22 @@ impl Downloader {
 
     /// Fetches file lists and patches manifest
     pub async fn prepare(&mut self) -> Result<(), Error> {
-        // Get files for main manifest
-        let new_entries = self
+        // Get depots for main manifest
+        let depots = self
             .manifest
-            .get_files(self.core.reqwest_client(), &self.language, &self.dlcs)
+            .get_depots(self.core.reqwest_client(), &self.language, &self.dlcs)
             .await?;
 
-        let mut old_entries = match &self.old_manifest {
+        let old_depots = match &self.old_manifest {
             Some(om) => {
-                om.get_files(
+                om.get_depots(
                     self.core.reqwest_client(),
                     &self.old_language,
                     &self.old_dlcs,
                 )
                 .await?
             }
-            None => HashMap::new(),
+            None => Vec::new(),
         };
 
         let re_used_dlcs: Vec<String> = self
@@ -228,14 +235,96 @@ impl Downloader {
         )
         .await?;
 
-        let mut patches = patches.unwrap_or_else(|| HashMap::new());
+        let results = diff::diff(depots, old_depots, patches.unwrap_or_default());
+        self.download_report = Some(results);
+        Ok(())
+    }
 
-        for (p_id, new_entries) in new_entries {
-            let old_entries = old_entries.remove(&p_id).unwrap_or(Vec::new());
-            let patches = patches.remove(&p_id).unwrap_or(Vec::new());
+    /// Check if enough disk space is available for operation to complete safely
+    pub async fn perform_safety_checks(&mut self) -> Result<(), Error> {
+        todo!();
+    }
 
-            let report = diff::diff(&p_id, new_entries, old_entries, patches);
-            self.diff_reports.push(report);
+    fn get_file_root(&self, is_support: bool) -> &PathBuf {
+        if is_support {
+            &self.support_path
+        } else {
+            &self.install_path
+        }
+    }
+
+    /// Execute the download.  
+    /// Make sure to run this after [`Self::prepare`]
+    pub async fn download(&mut self) -> Result<(), Error> {
+        if self.download_report.is_none() {
+            return Err(not_ready_error(
+                "download not ready, did you forget Downloader::prepare()?",
+            ));
+        }
+
+        let report = self.download_report.take().unwrap();
+
+        for file_list in &report.download {
+            for entry in &file_list.files {
+                match entry {
+                    DepotEntry::V1(v1::DepotEntry::Directory(dir)) => {
+                        let file_path = self
+                            .install_path
+                            .join(dir.path().replace('\\', "/").trim_matches('/'));
+                        if !file_path.exists() {
+                            fs::create_dir_all(file_path).await.map_err(io_error)?;
+                        }
+                    }
+                    DepotEntry::V2(v2::DepotEntry::Directory(dir)) => {
+                        let file_path = self
+                            .install_path
+                            .join(dir.path().replace('\\', "/").trim_matches('/'));
+                        if !file_path.exists() {
+                            fs::create_dir_all(file_path).await.map_err(io_error)?;
+                        }
+                    }
+
+                    DepotEntry::V1(v1::DepotEntry::File(file)) => {
+                        let file_root = self.get_file_root(*file.support());
+                        let file_path =
+                            file_root.join(file.path().replace('\\', "/").trim_matches('/'));
+                        fs::create_dir_all(file_path.parent().unwrap())
+                            .await
+                            .map_err(io_error)?;
+                        let file_handle = fs::OpenOptions::new()
+                            .append(true)
+                            .create(true)
+                            .open(file_path)
+                            .await
+                            .map_err(io_error)?;
+                        allocator::allocate(file_handle, *file.size())?;
+                    }
+
+                    DepotEntry::V2(v2::DepotEntry::File(file)) => {
+                        let is_support = file.flags().iter().any(|f| f == "support");
+                        let file_root = self.get_file_root(is_support);
+                        let file_path =
+                            file_root.join(file.path().replace('\\', "/").trim_matches('/'));
+
+                        fs::create_dir_all(file_path.parent().unwrap())
+                            .await
+                            .map_err(io_error)?;
+                        let file_handle = fs::OpenOptions::new()
+                            .append(true)
+                            .create(true)
+                            .open(file_path)
+                            .await
+                            .map_err(io_error)?;
+                        let size: i64 = file
+                            .chunks()
+                            .iter()
+                            .fold(0, |acc, chunk| acc + chunk.size());
+                        allocator::allocate(file_handle, size)?;
+                    }
+                    DepotEntry::V2(v2::DepotEntry::Link(_))
+                    | DepotEntry::V2(v2::DepotEntry::Diff(_)) => todo!(),
+                }
+            }
         }
 
         Ok(())

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::content_system::languages;
-use derive_getters::Getters;
+use derive_getters::{Dissolve, Getters};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Getters, Debug)]
@@ -59,13 +59,13 @@ pub struct GameID {
     standalone: bool,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct DepotDetails {
-    name: String,
-    depot: Depot,
+    pub(crate) name: String,
+    pub(crate) depot: Depot,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Dissolve, Debug)]
 pub struct Depot {
     files: Vec<DepotEntry>,
 }
@@ -92,7 +92,9 @@ pub struct DepotFile {
     hash: String,
     url: String,
     path: String,
-    size: u64,
+    size: i64,
+    support: bool,
+    executable: bool,
 }
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]

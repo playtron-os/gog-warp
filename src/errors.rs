@@ -9,10 +9,12 @@ pub enum ErrorKind {
     Unauthorized,
     Json,
     Request,
+    Io,
     Zlib,
     MaximumRetries,
     #[cfg(feature = "downloader")]
     DownloaderBuilder,
+    NotReady,
 }
 
 pub struct Error {
@@ -39,10 +41,12 @@ impl Display for Error {
             ErrorKind::NotLoggedIn => f.write_str("not logged-in error"),
             ErrorKind::Unauthorized => f.write_str("token is no longer valid"),
             ErrorKind::Request => f.write_str("network request error"),
+            ErrorKind::Io => f.write_str("io error"),
             ErrorKind::MaximumRetries => f.write_str("maximum retries exceeded"),
             ErrorKind::Zlib => f.write_str("zlib error"),
             #[cfg(feature = "downloader")]
             ErrorKind::DownloaderBuilder => f.write_str("builder error, required field missing"),
+            ErrorKind::NotReady => f.write_str("preconditions weren't met"),
         }
     }
 }
@@ -72,6 +76,10 @@ pub(crate) fn unauthorized_error() -> Error {
     Error::new(ErrorKind::Unauthorized, None::<BoxError>)
 }
 
+pub(crate) fn not_ready_error(err: &str) -> Error {
+    Error::new(ErrorKind::NotReady, Some(err))
+}
+
 #[cfg(feature = "downloader")]
 pub(crate) fn dbuilder_error() -> Error {
     Error::new(ErrorKind::DownloaderBuilder, None::<BoxError>)
@@ -91,4 +99,8 @@ pub(crate) fn request_error<E: Into<BoxError>>(err: E) -> Error {
 
 pub(crate) fn zlib_error<E: Into<BoxError>>(err: E) -> Error {
     Error::new(ErrorKind::Zlib, Some(err))
+}
+
+pub(crate) fn io_error<E: Into<BoxError>>(err: E) -> Error {
+    Error::new(ErrorKind::Io, Some(err))
 }

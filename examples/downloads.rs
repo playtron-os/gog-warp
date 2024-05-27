@@ -1,4 +1,5 @@
 use gog_warp::{Downloader, Platform};
+use std::env;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -7,7 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Created warp instance");
 
     let builds = core
-        .get_builds("1453375253", Platform::Windows, None)
+        .get_builds("2034949552", Platform::Windows, None)
         .await?;
     println!("Got builds");
 
@@ -18,16 +19,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let latest_manifest = core.get_manifest(&latest).await?;
     println!("Got manifest");
 
+    let home = env::var("HOME").unwrap();
+
     let mut downloader = Downloader::builder()
         .core(core)
         .language("en-US".to_string())
-        .install_root("/home/linguin/Games/warptest".into())
+        .install_root(format!("{}/Games/warptest", home).into())
         .manifest(latest_manifest, latest.build_id())
         .build()?;
     println!("Built downloader");
 
     downloader.prepare().await?;
     println!("Download prepared");
+
+    downloader.download().await?;
 
     Ok(())
 }

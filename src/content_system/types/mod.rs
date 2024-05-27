@@ -16,8 +16,22 @@ pub(crate) mod traits;
 pub mod v1;
 pub mod v2;
 
-/// Wrapper arround [`Vec<DepotEntry>`] containing depot product_id
-pub type DepotEntries = HashMap<String, Vec<DepotEntry>>;
+#[derive(Debug, Clone)]
+pub struct FileList {
+    pub(crate) product_id: String,
+    pub(crate) files: Vec<DepotEntry>,
+    pub(crate) sfc: Option<v2::SmallFilesContainer>,
+}
+
+impl FileList {
+    pub fn new(product_id: String, files: Vec<DepotEntry>) -> Self {
+        Self {
+            product_id,
+            files,
+            sfc: None,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum DepotEntry {
@@ -135,13 +149,13 @@ impl Manifest {
     /// This consists of game files alone
     /// The actual download size may slightly differ depending on the implementation
     // TODO: Mention dependencies system
-    pub fn install_size<I, V>(&self, language: &String, dlcs: I) -> (u64, u64)
+    pub fn install_size<I, V>(&self, language: &String, dlcs: I) -> (i64, i64)
     where
         I: IntoIterator<Item = V> + Copy,
         V: AsRef<str>,
     {
-        let mut download_size: u64 = 0;
-        let mut install_size: u64 = 0;
+        let mut download_size: i64 = 0;
+        let mut install_size: i64 = 0;
 
         match self {
             Self::V1(mv1) => {
@@ -163,8 +177,8 @@ impl Manifest {
                             continue;
                         }
                         if languages.contains(&"*".to_string()) || languages.contains(language) {
-                            download_size += size.parse::<u64>().unwrap();
-                            install_size += size.parse::<u64>().unwrap();
+                            download_size += size.parse::<i64>().unwrap();
+                            install_size += size.parse::<i64>().unwrap();
                         }
                     }
                 }
@@ -194,19 +208,19 @@ impl Manifest {
         (download_size, install_size)
     }
 
-    pub async fn get_files<I, V>(
+    pub async fn get_depots<I, V>(
         &self,
         reqwest_client: &Client,
         language: &String,
         dlcs: I,
-    ) -> Result<DepotEntries, crate::Error>
+    ) -> Result<Vec<FileList>, crate::Error>
     where
         I: IntoIterator<Item = V> + Copy,
         V: AsRef<str>,
     {
+        let mut depots = Vec::new();
         match self {
             Self::V1(mv1) => {
-                let mut files: DepotEntries = DepotEntries::new();
                 let root_game_id = mv1.product().root_game_id();
                 for depot in mv1.product().depots() {
                     if let v1::ManifestDepot::Files {
@@ -244,28 +258,19 @@ impl Manifest {
 
                         let json_data: v1::DepotDetails =
                             response.json().await.map_err(request_error)?;
-
-                        let mut new_files: Vec<DepotEntry> = json_data
-                            .depot()
-                            .files()
-                            .iter()
-                            .map(|f| DepotEntry::V1(f.clone()))
+                        let files = json_data
+                            .depot
+                            .dissolve()
+                            .into_iter()
+                            .map(DepotEntry::V1)
                             .collect();
 
-                        let product_files = files.get(game_ids.first().unwrap());
-                        if let Some(pf) = product_files {
-                            new_files.extend(pf.clone());
-                        }
-                        // This hurts my eyes
-                        files.extend([(game_ids.first().unwrap().clone(), new_files)]);
+                        depots.push(FileList::new(game_ids.first().unwrap().to_string(), files));
                     }
                 }
-
-                Ok(files)
             }
             Self::V2(mv2) => {
                 let root_game_id = mv2.base_product_id();
-                let mut files: DepotEntries = DepotEntries::new();
                 for depot in mv2.depots() {
                     // Check if depot is on wanted DLC list or if it's a base game
                     if depot.product_id() != root_game_id
@@ -298,23 +303,15 @@ impl Manifest {
 
                     let json_data: v2::DepotDetails =
                         serde_json::from_slice(&buffer).map_err(json_error)?;
-                    let mut new_files: Vec<DepotEntry> = json_data
-                        .depot()
-                        .items()
-                        .iter()
-                        .map(|f| DepotEntry::V2(f.clone()))
-                        .collect();
-                    // This hurts my eyes
-                    // FIXME: Can we figure out something better for this abomination
-                    let product_files = files.get(depot.product_id());
-                    if let Some(pf) = product_files {
-                        new_files.extend(pf.clone());
-                    }
-                    files.extend([(depot.product_id().clone(), new_files)]);
+                    let (entries, sfc) = json_data.depot.dissolve();
+                    let entries = entries.into_iter().map(DepotEntry::V2).collect();
+                    let mut f_list = FileList::new(depot.product_id().to_owned(), entries);
+                    f_list.sfc = sfc;
+                    depots.push(f_list);
                 }
-                Ok(files)
             }
         }
+        Ok(depots)
     }
 }
 

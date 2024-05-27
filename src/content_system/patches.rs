@@ -9,7 +9,7 @@ use crate::constants::domains::{GOG_CDN, GOG_CONTENT_SYSTEM};
 use crate::errors::{json_error, request_error, zlib_error};
 
 use super::types::v2::{DepotDetails, ManifestDepot};
-use super::types::{DepotEntries, DepotEntry, Manifest};
+use super::types::{DepotEntry, FileList, Manifest};
 
 #[derive(Deserialize, Getters, Debug)]
 pub struct PatchIndex {
@@ -50,7 +50,7 @@ pub async fn get_patches(
     dlcs: Vec<String>,
     new_language: &String,
     old_language: &String,
-) -> Result<Option<DepotEntries>, crate::Error> {
+) -> Result<Option<Vec<FileList>>, crate::Error> {
     if old_manifest.is_none() || old_build_id.is_none() {
         return Ok(None);
     }
@@ -109,7 +109,7 @@ pub async fn get_patches(
         })
         .collect();
 
-    let mut file_patches: DepotEntries = DepotEntries::new();
+    let mut file_patches: Vec<FileList> = Vec::new();
     for depot in wanted_depots {
         let url = format!(
             "{}/content-system/v2/patches/meta/{}",
@@ -129,16 +129,14 @@ pub async fn get_patches(
             serde_json::from_slice(&buffer).map_err(json_error)?
         };
 
-        let mut patches = details
-            .depot()
-            .items()
-            .iter()
-            .map(|e| DepotEntry::V2(e.clone()))
+        let patches = details
+            .depot
+            .dissolve()
+            .0
+            .into_iter()
+            .map(DepotEntry::V2)
             .collect::<Vec<DepotEntry>>();
-        if let Some(prev_patches) = file_patches.get(depot.product_id()) {
-            patches.extend(prev_patches.clone());
-        }
-        file_patches.insert(depot.product_id().clone(), patches);
+        file_patches.push(FileList::new(depot.product_id().to_owned(), patches));
     }
 
     Ok(Some(file_patches))
