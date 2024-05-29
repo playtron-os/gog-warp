@@ -1,6 +1,7 @@
 use crate::auth::get_token_for;
 use crate::auth::types::Token;
 use crate::constants::{GALAXY_CLIENT_ID, GALAXY_CLIENT_SECRET};
+use crate::content_system::dependencies::{self, DependenciesManifest};
 use crate::content_system::types::{Build, BuildResponse, Manifest, Platform};
 use crate::errors::{json_error, maximum_retries_error, zlib_error};
 use crate::library::types::GalaxyLibraryItem;
@@ -209,6 +210,11 @@ impl Core {
             }
         }
         Err(maximum_retries_error())
+    }
+
+    /// Get dependencies manifest
+    pub async fn get_dependencies_manifest(&self) -> Result<DependenciesManifest, errors::Error> {
+        dependencies::get_manifest(self.reqwest_client.clone()).await
     }
 }
 

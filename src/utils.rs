@@ -15,6 +15,13 @@ pub fn hash_to_galaxy_path(hash: &str) -> String {
 
 pub fn assemble_url(endpoint: &Endpoint, path: &str) -> String {
     let mut url = endpoint.url_format.clone();
+
+    if endpoint.parameters().is_empty() {
+        url.push_str("/");
+        url.push_str(path);
+        return url;
+    }
+
     for (param, value) in endpoint.parameters.iter() {
         let mut url_param = String::from("{");
         url_param.push_str(param);

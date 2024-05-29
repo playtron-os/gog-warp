@@ -5,6 +5,7 @@ use crate::auth::types::Token;
 use crate::constants::domains::GOG_CONTENT_SYSTEM;
 use crate::errors::request_error;
 
+pub mod dependencies;
 #[cfg(feature = "downloader")]
 pub mod downloader;
 pub mod languages;

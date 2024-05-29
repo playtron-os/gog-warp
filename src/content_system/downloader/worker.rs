@@ -43,7 +43,7 @@ pub async fn v2(
     let endpoint = endpoints.first().unwrap();
 
     for chunk in chunks {
-        let permit = chunk_semaphore.acquire().await.unwrap();
+        let _permit = chunk_semaphore.acquire().await.unwrap();
         let galaxy_path = hash_to_galaxy_path(chunk.compressed_md5());
         let url = assemble_url(endpoint, &galaxy_path);
 

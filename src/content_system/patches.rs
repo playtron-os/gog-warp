@@ -43,25 +43,34 @@ pub struct PatchDepots {
 
 pub async fn get_patches(
     reqwest_client: &Client,
-    manifest: &Manifest,
-    build_id: &String,
+    manifest: &Option<Manifest>,
+    build_id: &Option<String>,
     old_manifest: &Option<Manifest>,
     old_build_id: Option<String>,
     dlcs: Vec<String>,
     new_language: &String,
     old_language: &String,
 ) -> Result<Option<Vec<FileList>>, crate::Error> {
+    if manifest.is_none() || build_id.is_none() {
+        return Ok(None);
+    }
     if old_manifest.is_none() || old_build_id.is_none() {
         return Ok(None);
     }
-    if let Manifest::V1(_) = manifest {
+    if let Some(Manifest::V1(_)) = manifest {
         return Ok(None);
     }
     if let Some(Manifest::V1(_)) = old_manifest {
         return Ok(None);
     }
 
-    let product_id = manifest.product_id();
+    let build_id = build_id.clone().unwrap();
+
+    let product_id = if let Some(manifest) = manifest {
+        manifest.product_id()
+    } else {
+        return Ok(None);
+    };
 
     let index_url = format!("{}/products/{}/patches", GOG_CONTENT_SYSTEM, product_id);
     let index_url = Url::parse_with_params(
@@ -69,7 +78,7 @@ pub async fn get_patches(
         [
             ("_version", "4"),
             ("from_build_id", &old_build_id.unwrap()),
-            ("to_build_id", build_id),
+            ("to_build_id", &build_id),
         ],
     )
     .unwrap();

@@ -10,6 +10,7 @@ use super::types::Endpoint;
 
 #[derive(Deserialize, Debug)]
 pub struct SecureLinkResponse {
+    #[serde(default)]
     product_id: u32,
     urls: Vec<Endpoint>,
 }
@@ -63,6 +64,27 @@ pub async fn get_secure_link(
                 .iter()
                 .any(|g| *g == (version as u32))
         })
+        .cloned()
+        .collect())
+}
+
+pub async fn get_dependencies_link(reqwest_client: &Client) -> Result<Vec<Endpoint>, crate::Error> {
+    let url = format!(
+        "{}/open_link?generation=2&_version=2&path=/dependencies/store/",
+        GOG_CONTENT_SYSTEM
+    );
+    let response = reqwest_client
+        .get(url)
+        .send()
+        .await
+        .map_err(request_error)?;
+
+    let data: SecureLinkResponse = response.json().await.map_err(request_error)?;
+
+    Ok(data
+        .urls
+        .iter()
+        .filter(|u| u.supports_generation().iter().any(|g| *g == 2))
         .cloned()
         .collect())
 }

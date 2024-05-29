@@ -1,14 +1,20 @@
 use gog_warp::{Downloader, Platform};
 use std::env;
+use std::fs::read;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Init core
     let core = gog_warp::Core::new();
     println!("Created warp instance");
+    let data = read(".gog.token").expect("Failed to load token, use auth example first");
+    let tokens_str = String::from_utf8(data).expect("Failed to parse Utf-8 sequence");
+    // Load tokens into the core
+    core.deserialize_tokens(&tokens_str)
+        .expect("failed to load tokens");
 
     let builds = core
-        .get_builds("2034949552", Platform::Windows, None)
+        .get_builds("1207659234", Platform::Windows, None)
         .await?;
     println!("Got builds");
 
@@ -19,6 +25,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let latest_manifest = core.get_manifest(&latest).await?;
     println!("Got manifest");
 
+    let dependencies_manifest = core.get_dependencies_manifest().await?;
+
     let home = env::var("HOME").unwrap();
 
     let mut downloader = Downloader::builder()
@@ -26,13 +34,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .language("en-US".to_string())
         .install_root(format!("{}/Games/warptest", home).into())
         .manifest(latest_manifest, latest.build_id())
+        .game_dependencies(dependencies_manifest)
         .build()?;
     println!("Built downloader");
 
     downloader.prepare().await?;
     println!("Download prepared");
 
-    downloader.download().await?;
+    downloader.perform_safety_checks().await?;
+    let token = downloader.get_cancellaction();
+    let task = tokio::spawn(async move { downloader.download().await });
+
+    task.await??;
 
     Ok(())
 }

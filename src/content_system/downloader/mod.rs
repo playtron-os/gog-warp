@@ -14,6 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
+use super::dependencies::DependenciesManifest;
 use super::types::{traits::EntryUtils, Endpoint, Manifest};
 use super::types::{v1, v2, DepotEntry};
 
@@ -32,6 +33,8 @@ pub struct Builder {
     install_root: Option<PathBuf>,
     install_path: Option<PathBuf>,
     support_root: Option<PathBuf>,
+    dependency_manifest: Option<DependenciesManifest>,
+    global_dependencies: Vec<String>,
     language: Option<String>,
     old_language: Option<String>,
     dlcs: Vec<String>,
@@ -45,15 +48,21 @@ impl Builder {
     }
 
     pub fn build(self) -> Result<Downloader, Error> {
+        if self.manifest.is_none() && self.dependency_manifest.is_none() {
+            return Err(dbuilder_error());
+        }
         let core = self.core.ok_or_else(dbuilder_error)?;
-        let manifest = self.manifest.ok_or_else(dbuilder_error)?;
-        let build_id = self.build_id.ok_or_else(dbuilder_error)?;
-        let language = self.language.ok_or_else(dbuilder_error)?;
+        let language = self.language.unwrap_or("en-US".to_owned());
         let old_manifest = self.upgrade_from;
         let prev_build_id = self.prev_build_id;
 
+        let manifest = self.manifest;
+        let install_directory = match &manifest {
+            Some(m) => m.install_directory(),
+            None => "".to_string(),
+        };
         let install_path = match self.install_root {
-            Some(ir) => ir.join(manifest.install_directory()),
+            Some(ir) => ir.join(install_directory),
             None => self.install_path.ok_or_else(dbuilder_error)?,
         };
 
@@ -67,9 +76,12 @@ impl Builder {
             None => language.clone(),
         };
 
+        let build_id = self.build_id;
         let dlcs = self.dlcs;
         let old_dlcs = self.old_dlcs;
         let verify = self.verify;
+        let dependency_manifest = self.dependency_manifest;
+        let global_dependencies = self.global_dependencies;
 
         Ok(Downloader {
             core,
@@ -85,6 +97,8 @@ impl Builder {
             build_id,
             prev_build_id,
             cancellation_token: CancellationToken::new(),
+            global_dependencies,
+            dependency_manifest,
             download_report: None,
             max_speed: Mutex::new(-1),
         })
@@ -163,6 +177,24 @@ impl Builder {
         self
     }
 
+    /// Enable dependencies support by providing the manifest
+    pub fn game_dependencies(mut self, dependencies_manifest: DependenciesManifest) -> Self {
+        self.dependency_manifest = Some(dependencies_manifest);
+        self
+    }
+
+    /// Allows to download only global dependencies
+    /// When this is provided you can safely not provide any other parameter
+    pub fn global_dependencies(
+        mut self,
+        dependencies_manifest: DependenciesManifest,
+        dependencies: Vec<String>,
+    ) -> Self {
+        self.dependency_manifest = Some(dependencies_manifest);
+        self.global_dependencies = dependencies;
+        self
+    }
+
     /// Makes downloader verify the files from [`Self::manifest`]
     /// and download invalid/missing ones
     pub fn verify(mut self) -> Self {
@@ -176,9 +208,9 @@ pub struct Downloader {
     /// A warp Core
     core: Core,
     /// Manifest to upgrade to
-    manifest: Manifest,
+    manifest: Option<Manifest>,
     /// Build id of the new manifest
-    build_id: String,
+    build_id: Option<String>,
     /// Language that we target
     language: String,
     /// Language previously installed
@@ -197,6 +229,9 @@ pub struct Downloader {
     support_path: PathBuf,
     /// Whether to verify the files based on the manifest
     verify: bool,
+    /// Manifest to use for dependencies
+    dependency_manifest: Option<DependenciesManifest>,
+    global_dependencies: Vec<String>,
 
     cancellation_token: CancellationToken,
     download_report: Option<diff::DiffReport>,
@@ -220,12 +255,15 @@ impl Downloader {
     /// Fetches file lists and patches manifest
     pub async fn prepare(&mut self) -> Result<(), Error> {
         // Get depots for main manifest
-        let depots = self
-            .manifest
-            .get_depots(self.core.reqwest_client(), &self.language, &self.dlcs)
-            .await?;
+        let mut depots = match &self.manifest {
+            Some(m) => {
+                m.get_depots(self.core.reqwest_client(), &self.language, &self.dlcs)
+                    .await?
+            }
+            None => Vec::new(),
+        };
 
-        let old_depots = match &self.old_manifest {
+        let mut old_depots = match &self.old_manifest {
             Some(om) => {
                 om.get_depots(
                     self.core.reqwest_client(),
@@ -236,6 +274,30 @@ impl Downloader {
             }
             None => Vec::new(),
         };
+
+        if let Some(dm) = &self.dependency_manifest {
+            let reqwest_client = self.core.reqwest_client();
+            if let Some(manifest) = &self.manifest {
+                let new_deps = dm
+                    .get_depots(reqwest_client.clone(), &manifest.dependencies(), false)
+                    .await?;
+                depots.extend(new_deps);
+            }
+
+            if let Some(om) = &self.old_manifest {
+                let old_deps = dm
+                    .get_depots(reqwest_client.clone(), &om.dependencies(), false)
+                    .await?;
+                old_depots.extend(old_deps);
+            }
+
+            if !self.global_dependencies.is_empty() {
+                let global_deps = dm
+                    .get_depots(reqwest_client.clone(), &self.global_dependencies, true)
+                    .await?;
+                depots.extend(global_deps);
+            }
+        }
 
         let re_used_dlcs: Vec<String> = self
             .dlcs
@@ -312,7 +374,7 @@ impl Downloader {
             ));
         }
 
-        let manifest_version = if let Manifest::V1(_) = &self.manifest {
+        let manifest_version = if let Some(Manifest::V1(_)) = &self.manifest {
             1
         } else {
             2
@@ -331,8 +393,6 @@ impl Downloader {
                 .await
                 .map_err(io_error)?;
         }
-
-        let token = self.core.obtain_galaxy_token().await?;
 
         for file_list in &report.download {
             if let Some(sfc) = &file_list.sfc {
@@ -441,17 +501,23 @@ impl Downloader {
             } else {
                 ""
             };
-            if !secure_links.contains_key(&file_list.product_id) {
-                let endpoints = secure_link::get_secure_link(
-                    self.core.reqwest_client(),
-                    manifest_version,
-                    &product_id,
-                    &token,
-                    "/",
-                    root,
-                )
-                .await?;
-                secure_links.insert(file_list.product_id.clone(), endpoints);
+
+            if !secure_links.contains_key(&product_id) {
+                let endpoints = if product_id == "dependencies" {
+                    secure_link::get_dependencies_link(self.core.reqwest_client()).await?
+                } else {
+                    let token = self.core.obtain_galaxy_token().await?;
+                    secure_link::get_secure_link(
+                        self.core.reqwest_client(),
+                        manifest_version,
+                        &product_id,
+                        &token,
+                        "/",
+                        root,
+                    )
+                    .await?
+                };
+                secure_links.insert(product_id.clone(), endpoints);
             }
         }
 
@@ -475,25 +541,22 @@ impl Downloader {
                     let path = chunk.md5().clone();
                     let reqwest_client = self.core.reqwest_client().clone();
                     let tx = tx.clone();
-                    tokio::spawn(async move {
-                        worker::v2(
-                            file_permit,
-                            reqwest_client,
-                            chunk_semaphore,
-                            endpoints,
-                            v2::DepotEntry::File(v2::DepotFile {
-                                chunks,
-                                path,
-                                sfc_ref: None,
-                                md5: None,
-                                sha256: None,
-                                flags: Vec::new(),
-                            }),
-                            file_path,
-                            tx,
-                        )
-                        .await;
-                    });
+                    tokio::spawn(worker::v2(
+                        file_permit,
+                        reqwest_client,
+                        chunk_semaphore,
+                        endpoints,
+                        v2::DepotEntry::File(v2::DepotFile {
+                            chunks,
+                            path,
+                            sfc_ref: None,
+                            md5: None,
+                            sha256: None,
+                            flags: Vec::new(),
+                        }),
+                        file_path,
+                        tx,
+                    ));
                 }
             }
             for file in &list.files {
@@ -523,18 +586,15 @@ impl Downloader {
                         let reqwest_client = self.core.reqwest_client().clone();
                         let v2_entry = v2_entry.clone();
                         let tx = tx.clone();
-                        tokio::spawn(async {
-                            worker::v2(
-                                file_permit,
-                                reqwest_client,
-                                chunk_semaphore,
-                                endpoints,
-                                v2_entry,
-                                file_path,
-                                tx,
-                            )
-                            .await
-                        });
+                        tokio::spawn(worker::v2(
+                            file_permit,
+                            reqwest_client,
+                            chunk_semaphore,
+                            endpoints,
+                            v2_entry,
+                            file_path,
+                            tx,
+                        ));
                     }
                     _ => todo!(),
                 }
@@ -601,6 +661,19 @@ impl Downloader {
                 }
                 drop(sfc_handle);
                 fs::remove_file(sfc_path).await.map_err(io_error)?;
+            }
+        }
+
+        for (source, target) in &new_symlinks {
+            utils::symlink(&self.install_path, source, target)?;
+        }
+
+        for file in &report.deleted {
+            let file_path = file.path();
+            let root = self.get_file_root(file.is_support());
+            let file_path = root.join(file_path);
+            if file_path.exists() {
+                fs::remove_file(file_path).await.map_err(io_error)?;
             }
         }
 
