@@ -39,11 +39,31 @@ pub enum DepotEntry {
     V2(v2::DepotEntry),
 }
 
-impl traits::FilePath for DepotEntry {
+impl traits::EntryUtils for DepotEntry {
     fn path(&self) -> String {
         match self {
-            Self::V1(v1) => traits::FilePath::path(v1),
-            Self::V2(v2) => traits::FilePath::path(v2),
+            Self::V1(v1) => traits::EntryUtils::path(v1),
+            Self::V2(v2) => traits::EntryUtils::path(v2),
+        }
+    }
+    fn size(&self) -> i64 {
+        match self {
+            Self::V1(v1) => traits::EntryUtils::size(v1),
+            Self::V2(v2) => traits::EntryUtils::size(v2),
+        }
+    }
+
+    fn is_dir(&self) -> bool {
+        match self {
+            Self::V1(v1) => traits::EntryUtils::is_dir(v1),
+            Self::V2(v2) => traits::EntryUtils::is_dir(v2),
+        }
+    }
+
+    fn is_support(&self) -> bool {
+        match self {
+            Self::V1(v1) => traits::EntryUtils::is_support(v1),
+            Self::V2(v2) => traits::EntryUtils::is_support(v2),
         }
     }
 }
@@ -356,14 +376,15 @@ pub struct Build {
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct Endpoint {
-    endpoint_name: String,
-    url: String,
-    url_format: String,
-    parameters: HashMap<String, String>,
-    priority: u32,
-    max_fails: u32,
-    supports_generation: Vec<u32>,
-    fallback_only: bool,
+    pub(crate) endpoint_name: String,
+    #[serde(default)]
+    pub(crate) url: String,
+    pub(crate) url_format: String,
+    pub(crate) parameters: HashMap<String, serde_json::Value>,
+    pub(crate) priority: u32,
+    pub(crate) max_fails: u32,
+    pub(crate) supports_generation: Vec<u32>,
+    pub(crate) fallback_only: bool,
 }
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]

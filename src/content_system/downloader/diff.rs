@@ -1,10 +1,18 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::content_system::types::{traits::FilePath, v1, v2, DepotEntry, FileList};
+use crate::content_system::types::{traits::EntryUtils, v1, v2, DepotEntry, FileList};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
+pub struct Patch {
+    pub(crate) product_id: String,
+    pub(crate) diff: DepotEntry,
+    pub(crate) destination_file: DepotEntry,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct DiffReport {
     pub(crate) download: Vec<FileList>,
+    pub(crate) patches: Vec<Patch>,
     pub(crate) directories: Vec<DepotEntry>,
     pub(crate) deleted: Vec<DepotEntry>,
     size_diff: i64,
@@ -31,6 +39,7 @@ pub fn diff(
 
     let mut deleted_paths: HashSet<String> = HashSet::new();
     let mut final_download: HashSet<String> = HashSet::from_iter(new.keys().cloned());
+    let mut patched_files: HashMap<String, DepotEntry> = HashMap::new();
 
     // Prepare report
     let mut report = DiffReport::default();
@@ -110,6 +119,7 @@ pub fn diff(
 
                 // If there was a patch for this path, skip it
                 if patches_set.contains_key(new_path) {
+                    patched_files.insert(new_path.clone(), (*new_file).clone());
                     continue;
                 }
 
@@ -128,7 +138,7 @@ pub fn diff(
                         && of.sha256().is_some()
                         && nf.sha256() == of.sha256())
                 {
-                    final_download.remove(&nf.path().to_lowercase());
+                    final_download.remove(new_path);
                 }
             }
 
@@ -143,7 +153,7 @@ pub fn diff(
         let mut needs_sfc = false;
 
         for entry in file_list.files {
-            if final_download.contains(&entry.path().to_lowercase()) {
+            if final_download.remove(&entry.path().to_lowercase()) {
                 if !needs_sfc {
                     if let DepotEntry::V2(v2::DepotEntry::File(file)) = &entry {
                         needs_sfc = file.sfc_ref().is_some()
@@ -169,7 +179,24 @@ pub fn diff(
         }
     }
 
-    report.download.extend(patches);
+    for list in patches {
+        for patch in list.files {
+            if let DepotEntry::V2(v2::DepotEntry::Diff(_)) = patch {
+                let file_path = patch.path();
+                let new_file = patched_files
+                    .get(&file_path.to_lowercase())
+                    .cloned()
+                    .unwrap();
+
+                let patch_report = Patch {
+                    product_id: list.product_id.clone(),
+                    diff: patch,
+                    destination_file: new_file,
+                };
+                report.patches.push(patch_report);
+            }
+        }
+    }
 
     report
 }

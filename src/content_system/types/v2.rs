@@ -14,6 +14,7 @@ pub struct Manifest {
     install_directory: String,
     platform: String,
     products: Vec<ManifestProduct>,
+    #[serde(default)]
     script_interpreter: bool,
     tags: Vec<String>,
 }
@@ -66,17 +67,34 @@ pub enum DepotEntry {
     Diff(DepotDiff),
 }
 
-impl super::traits::FilePath for DepotEntry {
+impl super::traits::EntryUtils for DepotEntry {
     fn path(&self) -> String {
         match self {
-            Self::File(f) => f.path().replace('\\', "/").trim_matches('/').to_string(),
-            Self::Directory(d) => d.path().replace('\\', "/").trim_matches('/').to_string(),
-            Self::Link(l) => l.path().replace('\\', "/").trim_matches('/').to_string(),
-            Self::Diff(d) => d
-                .path_source()
-                .replace('\\', "/")
-                .trim_matches('/')
-                .to_string(),
+            Self::File(f) => f.path(),
+            Self::Directory(d) => d.path(),
+            Self::Link(l) => l.path(),
+            Self::Diff(d) => d.path_source(),
+        }
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_string()
+    }
+    fn size(&self) -> i64 {
+        match self {
+            Self::File(f) => f.chunks().iter().fold(0, |acc, ch| acc + ch.size),
+            Self::Diff(f) => f.chunks().iter().fold(0, |acc, ch| acc + ch.size),
+            _ => 0,
+        }
+    }
+
+    fn is_dir(&self) -> bool {
+        matches!(self, Self::Directory(_))
+    }
+
+    fn is_support(&self) -> bool {
+        match self {
+            Self::File(f) => f.flags().iter().any(|f| f == "support"),
+            _ => false,
         }
     }
 }
@@ -95,23 +113,23 @@ pub struct DepotLink {
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DepotFile {
-    chunks: Vec<Chunk>,
-    path: String,
-    sfc_ref: Option<SmallFilesContainerRef>,
-    sha256: Option<String>,
-    md5: Option<String>,
+    pub(crate) chunks: Vec<Chunk>,
+    pub(crate) path: String,
+    pub(crate) sfc_ref: Option<SmallFilesContainerRef>,
+    pub(crate) sha256: Option<String>,
+    pub(crate) md5: Option<String>,
     #[serde(default)]
-    flags: Vec<String>,
+    pub(crate) flags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct DepotDiff {
-    md5_source: String,
-    md5_target: String,
-    path_source: String,
-    path_target: String,
-    md5: String,
-    chunks: Vec<Chunk>,
+    pub(crate) md5_source: String,
+    pub(crate) md5_target: String,
+    pub(crate) path_source: String,
+    pub(crate) path_target: String,
+    pub(crate) md5: String,
+    pub(crate) chunks: Vec<Chunk>,
 }
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
@@ -125,8 +143,8 @@ pub struct Chunk {
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct SmallFilesContainerRef {
-    offset: i64,
-    size: i64,
+    offset: u64,
+    size: u64,
 }
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]

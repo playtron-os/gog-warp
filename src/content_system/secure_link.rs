@@ -4,13 +4,13 @@ use url::Url;
 
 use crate::auth::types::Token;
 use crate::constants::domains::GOG_CONTENT_SYSTEM;
-use crate::errors::request_error;
+use crate::errors::{request_error, unauthorized_error};
 
 use super::types::Endpoint;
 
 #[derive(Deserialize, Debug)]
 pub struct SecureLinkResponse {
-    product_id: String,
+    product_id: u32,
     urls: Vec<Endpoint>,
 }
 
@@ -48,6 +48,10 @@ pub async fn get_secure_link(
         .send()
         .await
         .map_err(request_error)?;
+
+    if response.status().as_u16() == 401 {
+        return Err(unauthorized_error());
+    }
 
     let data: SecureLinkResponse = response.json().await.map_err(request_error)?;
 

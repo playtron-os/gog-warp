@@ -77,12 +77,30 @@ pub enum DepotEntry {
     Directory(DepotDirectory),
 }
 
-impl super::traits::FilePath for DepotEntry {
+impl super::traits::EntryUtils for DepotEntry {
     fn path(&self) -> String {
         match self {
-            Self::File(f) => f.path().replace('\\', "/").trim_matches('/').to_string(),
-            Self::Directory(d) => d.path().replace('\\', "/").trim_matches('/').to_string(),
+            Self::File(f) => f.path(),
+            Self::Directory(d) => d.path(),
         }
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_string()
+    }
+    fn size(&self) -> i64 {
+        match self {
+            Self::File(f) => f.size,
+            _ => 0,
+        }
+    }
+    fn is_support(&self) -> bool {
+        match self {
+            Self::File(f) => *f.support(),
+            _ => false,
+        }
+    }
+    fn is_dir(&self) -> bool {
+        matches!(self, Self::Directory(_))
     }
 }
 

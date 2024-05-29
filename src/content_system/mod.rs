@@ -9,6 +9,7 @@ use crate::errors::request_error;
 pub mod downloader;
 pub mod languages;
 pub mod patches;
+pub mod secure_link;
 #[cfg(test)]
 mod tests;
 pub mod types;

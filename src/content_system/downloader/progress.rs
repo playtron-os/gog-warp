@@ -1,3 +1,10 @@
+pub(crate) enum DownloadFileStatus {
+    NotInitialized,
+    Allocated,
+    //Partial(u32), // Number of chunks that are downloaded
+    Done,
+}
+
 pub enum DownloadState {
     Preparing,
     Allocating(f32),

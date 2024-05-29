@@ -7,6 +7,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub enum ErrorKind {
     NotLoggedIn,
     Unauthorized,
+    Cancelled,
     Json,
     Request,
     Io,
@@ -44,6 +45,7 @@ impl Display for Error {
             ErrorKind::Io => f.write_str("io error"),
             ErrorKind::MaximumRetries => f.write_str("maximum retries exceeded"),
             ErrorKind::Zlib => f.write_str("zlib error"),
+            ErrorKind::Cancelled => f.write_str("operation was cancelled"),
             #[cfg(feature = "downloader")]
             ErrorKind::DownloaderBuilder => f.write_str("builder error, required field missing"),
             ErrorKind::NotReady => f.write_str("preconditions weren't met"),
@@ -74,6 +76,10 @@ pub(crate) fn not_logged_in_error() -> Error {
 
 pub(crate) fn unauthorized_error() -> Error {
     Error::new(ErrorKind::Unauthorized, None::<BoxError>)
+}
+
+pub(crate) fn cancelled_error() -> Error {
+    Error::new(ErrorKind::Cancelled, None::<BoxError>)
 }
 
 pub(crate) fn not_ready_error(err: &str) -> Error {
