@@ -10,6 +10,7 @@ pub enum ErrorKind {
     Cancelled,
     Json,
     Request,
+    Task,
     Io,
     Zlib,
     MaximumRetries,
@@ -46,6 +47,7 @@ impl Display for Error {
             ErrorKind::MaximumRetries => f.write_str("maximum retries exceeded"),
             ErrorKind::Zlib => f.write_str("zlib error"),
             ErrorKind::Cancelled => f.write_str("operation was cancelled"),
+            ErrorKind::Task => f.write_str("error occured in the task executor"),
             #[cfg(feature = "downloader")]
             ErrorKind::DownloaderBuilder => f.write_str("builder error, required field missing"),
             ErrorKind::NotReady => f.write_str("preconditions weren't met"),
@@ -109,4 +111,8 @@ pub(crate) fn zlib_error<E: Into<BoxError>>(err: E) -> Error {
 
 pub(crate) fn io_error<E: Into<BoxError>>(err: E) -> Error {
     Error::new(ErrorKind::Io, Some(err))
+}
+
+pub(crate) fn task_error<E: Into<BoxError>>(err: E) -> Error {
+    Error::new(ErrorKind::Task, Some(err))
 }

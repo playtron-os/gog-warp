@@ -2,7 +2,7 @@ use crate::content_system::languages;
 use derive_getters::{Dissolve, Getters};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     base_product_id: String,
@@ -19,7 +19,7 @@ pub struct Manifest {
     tags: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ManifestDepot {
     size: i64,
@@ -32,7 +32,7 @@ pub struct ManifestDepot {
     product_id: String,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug, Clone)]
 pub struct ManifestProduct {
     name: String,
     #[serde(rename = "productId")]

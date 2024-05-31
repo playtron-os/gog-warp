@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::content_system::secure_link;
-use crate::errors::cancelled_error;
+use crate::errors::{cancelled_error, task_error};
 use crate::{
     errors::{dbuilder_error, io_error, not_ready_error},
     Core, Error,
@@ -53,7 +53,7 @@ impl Builder {
         }
         let core = self.core.ok_or_else(dbuilder_error)?;
         let language = self.language.unwrap_or("en-US".to_owned());
-        let old_manifest = self.upgrade_from;
+        let mut old_manifest = self.upgrade_from;
         let prev_build_id = self.prev_build_id;
 
         let manifest = self.manifest;
@@ -71,6 +71,11 @@ impl Builder {
             None => install_path.join("gog-support"),
         };
 
+        let support_path = match &manifest {
+            Some(Manifest::V2(m)) => support_path.join(m.base_product_id()),
+            _ => support_path,
+        };
+
         let old_language = match self.old_language {
             Some(ol) => ol,
             None => language.clone(),
@@ -82,6 +87,10 @@ impl Builder {
         let verify = self.verify;
         let dependency_manifest = self.dependency_manifest;
         let global_dependencies = self.global_dependencies;
+
+        if (!old_dlcs.is_empty() || language != old_language) && old_manifest.is_none() {
+            old_manifest = manifest.clone()
+        }
 
         Ok(Downloader {
             core,
@@ -327,7 +336,7 @@ impl Downloader {
     pub async fn perform_safety_checks(&mut self) -> Result<(), Error> {
         let report = self.download_report.take().unwrap();
         let mut size_total: i64 = 0;
-        // Since we want to allow the game to be playable after pausing the download
+        // Since we want to allow the game to be playable after pausing the update
         // we are not subtracting deleted files sizes
         for list in &report.download {
             if let Some(sfc) = &list.sfc {
@@ -380,13 +389,17 @@ impl Downloader {
             2
         };
 
+        let timestamp = if let Some(manifest) = &self.manifest {
+            manifest.repository_timestamp()
+        } else {
+            None
+        };
+
         let report = self.download_report.clone().unwrap();
         let mut new_symlinks: Vec<(String, String)> = Vec::new();
         let mut ready_files: HashSet<String> = HashSet::new();
         let secure_links: Arc<Mutex<HashMap<String, Vec<Endpoint>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-
-        let mut file_count: u32 = 0;
 
         if !self.install_path.exists() {
             fs::create_dir_all(&self.install_path)
@@ -413,7 +426,6 @@ impl Downloader {
                             .open(download_path)
                             .await
                             .map_err(io_error)?;
-                        file_count += 1;
                         utils::allocate(file_handle, size).await?;
                     }
                     progress::DownloadFileStatus::Done => {
@@ -483,7 +495,6 @@ impl Downloader {
                             .open(allocation_file)
                             .await
                             .map_err(io_error)?;
-                        file_count += 1;
                         utils::allocate(file_handle, file_size).await?;
                     }
                     progress::DownloadFileStatus::Done => {
@@ -502,6 +513,12 @@ impl Downloader {
                 ""
             };
 
+            let path = if manifest_version == 2 {
+                "/".to_owned()
+            } else {
+                format!("/windows/{}", timestamp.unwrap())
+            };
+
             if !secure_links.contains_key(&product_id) {
                 let endpoints = if product_id == "dependencies" {
                     secure_link::get_dependencies_link(self.core.reqwest_client()).await?
@@ -512,7 +529,7 @@ impl Downloader {
                         manifest_version,
                         &product_id,
                         &token,
-                        "/",
+                        &path,
                         root,
                     )
                     .await?
@@ -522,9 +539,11 @@ impl Downloader {
         }
 
         let file_semaphore = Arc::new(Semaphore::new(4));
-        let chunk_semaphore = Arc::new(Semaphore::new(10));
+        let chunk_semaphore = Arc::new(Semaphore::new(8));
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        // TODO: Handle download speed and progress reports
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let mut handles: Vec<_> = Vec::new();
 
         for list in &report.download {
             if let Some(sfc) = &list.sfc {
@@ -532,36 +551,44 @@ impl Downloader {
                 if !ready_files.contains(chunk.md5()) {
                     let entry_root = self.get_file_root(false);
                     let file_path = entry_root.join(chunk.md5());
-                    let file_permit = file_semaphore.clone().acquire_owned().await.unwrap();
-                    let secure_links = secure_links.lock().await;
-                    let endpoints = secure_links.get(&list.product_id).unwrap().clone();
 
+                    let product_id = list.product_id.clone();
+                    let secure_links = secure_links.clone();
                     let chunk_semaphore = chunk_semaphore.clone();
                     let chunks = sfc.chunks().clone();
+                    let file_semaphore = file_semaphore.clone();
                     let path = chunk.md5().clone();
                     let reqwest_client = self.core.reqwest_client().clone();
                     let tx = tx.clone();
-                    tokio::spawn(worker::v2(
-                        file_permit,
-                        reqwest_client,
-                        chunk_semaphore,
-                        endpoints,
-                        v2::DepotEntry::File(v2::DepotFile {
-                            chunks,
-                            path,
-                            sfc_ref: None,
-                            md5: None,
-                            sha256: None,
-                            flags: Vec::new(),
-                        }),
-                        file_path,
-                        tx,
-                    ));
+                    handles.push(tokio::spawn(async move {
+                        let file_permit = file_semaphore.acquire_owned().await.unwrap();
+                        let secure_links = secure_links.lock().await;
+                        let endpoints = secure_links.get(&product_id).unwrap().clone();
+                        drop(secure_links);
+
+                        worker::v2(
+                            file_permit,
+                            reqwest_client,
+                            chunk_semaphore,
+                            endpoints,
+                            v2::DepotEntry::File(v2::DepotFile {
+                                chunks,
+                                path,
+                                sfc_ref: None,
+                                md5: None,
+                                sha256: None,
+                                flags: Vec::new(),
+                            }),
+                            file_path,
+                            tx,
+                        )
+                        .await
+                    }));
                 }
             }
             for file in &list.files {
                 let file_path = file.path();
-                if ready_files.contains(&file_path) {
+                if ready_files.contains(&file_path) || file.is_dir() {
                     continue;
                 }
                 let root = self.get_file_root(file.is_support());
@@ -574,38 +601,66 @@ impl Downloader {
                                     "skipping {}, it will be extracted from sfc",
                                     file.path
                                 );
-                                file_count -= 1;
                                 continue;
                             }
                         }
-                        let file_permit = file_semaphore.clone().acquire_owned().await.unwrap();
-                        let secure_links = secure_links.lock().await;
-                        let endpoints = secure_links.get(&list.product_id).unwrap().clone();
+                        let file_semaphore = file_semaphore.clone();
+                        let secure_links = secure_links.clone();
 
                         let chunk_semaphore = chunk_semaphore.clone();
                         let reqwest_client = self.core.reqwest_client().clone();
                         let v2_entry = v2_entry.clone();
                         let tx = tx.clone();
-                        tokio::spawn(worker::v2(
-                            file_permit,
-                            reqwest_client,
-                            chunk_semaphore,
-                            endpoints,
-                            v2_entry,
-                            file_path,
-                            tx,
-                        ));
+                        let product_id = list.product_id.clone();
+                        handles.push(tokio::spawn(async move {
+                            let file_permit = file_semaphore.clone().acquire_owned().await.unwrap();
+                            let secure_links = secure_links.lock().await;
+                            let endpoints = secure_links.get(&product_id).unwrap().clone();
+                            drop(secure_links);
+
+                            worker::v2(
+                                file_permit,
+                                reqwest_client,
+                                chunk_semaphore,
+                                endpoints,
+                                v2_entry,
+                                file_path,
+                                tx,
+                            )
+                            .await
+                        }));
                     }
-                    _ => todo!(),
+                    DepotEntry::V1(v1_entry) => {
+                        let file_semaphore = file_semaphore.clone();
+                        let secure_links = secure_links.clone();
+
+                        let product_id = list.product_id.clone();
+                        let reqwest_client = self.core.reqwest_client().clone();
+                        let v1_entry = v1_entry.clone();
+                        let tx = tx.clone();
+                        handles.push(tokio::spawn(async move {
+                            let file_permit = file_semaphore.clone().acquire_owned().await.unwrap();
+                            let secure_links = secure_links.lock().await;
+                            let endpoints = secure_links.get(&product_id).unwrap().clone();
+                            drop(secure_links);
+                            worker::v1(
+                                file_permit,
+                                reqwest_client,
+                                endpoints,
+                                v1_entry,
+                                file_path,
+                                tx,
+                            )
+                            .await
+                        }));
+                    }
                 }
             }
         }
 
-        while file_count > 0 {
-            if let Some(_) = rx.recv().await {
-                file_count -= 1;
-            }
-        }
+        futures::future::try_join_all(handles)
+            .await
+            .map_err(task_error)?;
 
         // Finalize the download
 

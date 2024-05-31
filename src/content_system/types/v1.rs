@@ -4,12 +4,12 @@ use crate::content_system::languages;
 use derive_getters::{Dissolve, Getters};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug, Clone)]
 pub struct Manifest {
     product: ManifestProduct,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug, Clone)]
 pub struct ManifestProduct {
     timestamp: u32,
     depots: Vec<ManifestDepot>,
@@ -22,7 +22,7 @@ pub struct ManifestProduct {
     root_game_id: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum ManifestDepot {
     Files {
@@ -40,7 +40,7 @@ pub enum ManifestDepot {
     },
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug, Clone)]
 pub struct SupportCommand {
     #[serde(deserialize_with = "languages::serde_language")]
     languages: Vec<String>,
@@ -51,7 +51,7 @@ pub struct SupportCommand {
     systems: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Getters, Debug)]
+#[derive(Serialize, Deserialize, Getters, Debug, Clone)]
 pub struct GameID {
     #[serde(rename = "gameID")]
     game_id: String,
@@ -61,12 +61,12 @@ pub struct GameID {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DepotDetails {
-    pub(crate) name: String,
     pub(crate) depot: Depot,
 }
 
 #[derive(Serialize, Deserialize, Dissolve, Debug)]
 pub struct Depot {
+    name: String,
     files: Vec<DepotEntry>,
 }
 
@@ -106,12 +106,14 @@ impl super::traits::EntryUtils for DepotEntry {
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct DepotFile {
-    offset: u64,
+    offset: i64,
     hash: String,
     url: String,
     path: String,
     size: i64,
+    #[serde(default)]
     support: bool,
+    #[serde(default)]
     executable: bool,
 }
 

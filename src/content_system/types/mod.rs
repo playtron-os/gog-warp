@@ -68,7 +68,7 @@ impl traits::EntryUtils for DepotEntry {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum Manifest {
     V1(v1::Manifest),
@@ -82,6 +82,14 @@ impl Manifest {
             Self::V1(mv1) => mv1.product().root_game_id().clone(),
             Self::V2(mv2) => mv2.base_product_id().clone(),
         }
+    }
+
+    /// For V1 builds used to prepare secure links
+    pub fn repository_timestamp(&self) -> Option<u32> {
+        if let Self::V1(mv1) = self {
+            return Some(*mv1.product().timestamp());
+        }
+        None
     }
 
     /// Gets game install directory name
@@ -281,6 +289,7 @@ impl Manifest {
                         let files = json_data
                             .depot
                             .dissolve()
+                            .1
                             .into_iter()
                             .map(DepotEntry::V1)
                             .collect();
