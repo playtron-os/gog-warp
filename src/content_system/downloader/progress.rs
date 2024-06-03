@@ -2,6 +2,7 @@ pub(crate) enum DownloadFileStatus {
     NotInitialized,
     Allocated,
     //Partial(u32), // Number of chunks that are downloaded
+    PatchDownloaded,
     Done,
 }
 
@@ -12,9 +13,10 @@ pub enum DownloadState {
 }
 
 pub struct DownloadProgress {
-    downloaded: u64,
-    written: u64,
-    size: u64,
-    avg_network: f32,
-    avg_disk: f32,
+    pub downloaded: u64,
+    pub written: u64,
+    pub total_download: u64,
+    pub total_size: u64,
+    pub avg_network: f32,
+    pub avg_disk: f32,
 }

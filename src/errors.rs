@@ -13,6 +13,7 @@ pub enum ErrorKind {
     Task,
     Io,
     Zlib,
+    Xdelta(String),
     MaximumRetries,
     #[cfg(feature = "downloader")]
     DownloaderBuilder,
@@ -38,7 +39,7 @@ impl Error {
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.kind {
+        match &self.kind {
             ErrorKind::Json => f.write_str("json serialization error"),
             ErrorKind::NotLoggedIn => f.write_str("not logged-in error"),
             ErrorKind::Unauthorized => f.write_str("token is no longer valid"),
@@ -46,6 +47,7 @@ impl Display for Error {
             ErrorKind::Io => f.write_str("io error"),
             ErrorKind::MaximumRetries => f.write_str("maximum retries exceeded"),
             ErrorKind::Zlib => f.write_str("zlib error"),
+            ErrorKind::Xdelta(msg) => f.write_fmt(format_args!("decompression error {}", msg)),
             ErrorKind::Cancelled => f.write_str("operation was cancelled"),
             ErrorKind::Task => f.write_str("error occured in the task executor"),
             #[cfg(feature = "downloader")]
@@ -107,6 +109,10 @@ pub(crate) fn request_error<E: Into<BoxError>>(err: E) -> Error {
 
 pub(crate) fn zlib_error<E: Into<BoxError>>(err: E) -> Error {
     Error::new(ErrorKind::Zlib, Some(err))
+}
+
+pub(crate) fn xdelta_error(msg: String) -> Error {
+    Error::new(ErrorKind::Xdelta(msg), None::<BoxError>)
 }
 
 pub(crate) fn io_error<E: Into<BoxError>>(err: E) -> Error {

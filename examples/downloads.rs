@@ -33,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .core(core)
         .language("en-US".to_string())
         .install_root(format!("{}/Games/warptest", home).into())
+        .support_root(format!("{}/Games/warptest/support", home).into())
         .manifest(latest_manifest, latest.build_id())
         .game_dependencies(dependencies_manifest)
         .build()?;
@@ -41,8 +42,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     downloader.prepare().await?;
     println!("Download prepared");
 
-    downloader.perform_safety_checks().await?;
-    let token = downloader.get_cancellaction();
+    let required_space = downloader.get_requied_space().await?;
+    println!(
+        "This operation requires {} additional disk space",
+        required_space
+    );
+    let token = downloader.get_cancellation();
     let task = tokio::spawn(async move { downloader.download().await });
 
     task.await??;

@@ -23,7 +23,7 @@ impl DependenciesManifest {
     pub async fn get_depots(
         &self,
         reqwest_client: Client,
-        wanted_dependencies: &Vec<String>,
+        wanted_dependencies: &[String],
         global: bool,
     ) -> Result<Vec<FileList>, crate::Error> {
         let mut lists = Vec::new();

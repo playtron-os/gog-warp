@@ -1,6 +1,5 @@
 use crate::errors::io_error;
 use crate::Error;
-use std::path::Path;
 
 use tokio::fs::File;
 
@@ -15,7 +14,7 @@ pub async fn allocate(file: File, size: i64) -> Result<(), Error> {
         let fd = file.as_raw_fd();
         let result = unsafe { libc::fallocate(fd, 0, 0, size) };
 
-        if result != 0 && result != libc::EOPNOTSUPP {
+        if result != 0 {
             return Err(io_error("allocation error"));
         }
         Ok(())
@@ -26,17 +25,23 @@ pub async fn allocate(file: File, size: i64) -> Result<(), Error> {
 
 #[cfg(not(target_os = "linux"))]
 pub async fn allocate(file: File, size: i64) -> Result<(), Error> {
-    log::warn!("File pre-allocation is not implemented on this platform yet.");
-    Ok(())
+    log::error!("File pre-allocation is not implemented on this platform yet.");
+    Err(io_error("pre allocation not implemented"))
 }
 
 #[cfg(unix)]
-pub fn symlink(install_root: &Path, path: &str, target: &str) -> Result<(), Error> {
+pub fn symlink(path: &str, target: &str) -> Result<(), Error> {
     use libc::{open, symlinkat, O_DIRECTORY};
-    use std::ffi::CString;
+    use std::{ffi::CString, path::PathBuf, str::FromStr};
 
-    let install_root_path = CString::new(install_root.to_str().unwrap()).map_err(io_error)?;
+    let link_path = PathBuf::from_str(path).unwrap();
+    let parent = link_path.parent().unwrap();
+
+    let install_root_path = CString::new(parent.to_str().unwrap()).map_err(io_error)?;
     let c_path = CString::new(path).map_err(io_error)?;
+    if link_path.exists() {
+        std::fs::remove_file(link_path).map_err(io_error)?;
+    }
     let c_target = CString::new(target).map_err(io_error)?;
     let directory_fd = unsafe { open(install_root_path.as_ptr(), O_DIRECTORY) };
 

@@ -19,6 +19,7 @@ use super::types::{traits::EntryUtils, Endpoint, Manifest};
 use super::types::{v1, v2, DepotEntry};
 
 mod diff;
+mod patching;
 pub mod progress;
 mod utils;
 mod worker;
@@ -35,6 +36,7 @@ pub struct Builder {
     support_root: Option<PathBuf>,
     dependency_manifest: Option<DependenciesManifest>,
     global_dependencies: Vec<String>,
+    old_global_dependencies: Vec<String>,
     language: Option<String>,
     old_language: Option<String>,
     dlcs: Vec<String>,
@@ -87,15 +89,17 @@ impl Builder {
         let verify = self.verify;
         let dependency_manifest = self.dependency_manifest;
         let global_dependencies = self.global_dependencies;
+        let old_global_dependencies = self.old_global_dependencies;
 
         if (!old_dlcs.is_empty() || language != old_language) && old_manifest.is_none() {
-            old_manifest = manifest.clone()
+            old_manifest.clone_from(&manifest);
         }
 
         Ok(Downloader {
             core,
             manifest,
             old_manifest,
+            tmp_path: install_path.join("!Temp"),
             install_path,
             support_path,
             language,
@@ -107,6 +111,7 @@ impl Builder {
             prev_build_id,
             cancellation_token: CancellationToken::new(),
             global_dependencies,
+            old_global_dependencies,
             dependency_manifest,
             download_report: None,
             max_speed: Mutex::new(-1),
@@ -204,6 +209,13 @@ impl Builder {
         self
     }
 
+    /// When provided allows to delete unused dependencies.
+    /// To be used together with [`Self::global_dependencies`]
+    pub fn old_global_dependencies(mut self, dependencies: Vec<String>) -> Self {
+        self.old_global_dependencies = dependencies;
+        self
+    }
+
     /// Makes downloader verify the files from [`Self::manifest`]
     /// and download invalid/missing ones
     pub fn verify(mut self) -> Self {
@@ -236,11 +248,16 @@ pub struct Downloader {
     install_path: PathBuf,
     /// Path of support files
     support_path: PathBuf,
+    /// Tmp path for update files
+    tmp_path: PathBuf,
     /// Whether to verify the files based on the manifest
     verify: bool,
     /// Manifest to use for dependencies
     dependency_manifest: Option<DependenciesManifest>,
+    /// Global dependencies to upgrade to
     global_dependencies: Vec<String>,
+    /// Global dependencies to upgrade from
+    old_global_dependencies: Vec<String>,
 
     cancellation_token: CancellationToken,
     download_report: Option<diff::DiffReport>,
@@ -253,7 +270,7 @@ impl Downloader {
     }
 
     // Stops the download
-    pub fn get_cancellaction(&self) -> CancellationToken {
+    pub fn get_cancellation(&self) -> CancellationToken {
         self.cancellation_token.clone()
     }
 
@@ -306,6 +323,13 @@ impl Downloader {
                     .await?;
                 depots.extend(global_deps);
             }
+
+            if !self.old_global_dependencies.is_empty() {
+                let old_global_deps = dm
+                    .get_depots(reqwest_client.clone(), &self.old_global_dependencies, true)
+                    .await?;
+                old_depots.extend(old_global_deps);
+            }
         }
 
         let re_used_dlcs: Vec<String> = self
@@ -332,28 +356,53 @@ impl Downloader {
         Ok(())
     }
 
-    /// Check if enough disk space is available for operation to complete safely
-    pub async fn perform_safety_checks(&mut self) -> Result<(), Error> {
+    /// Return space required for operation to complete takes in account pre-allocated files
+    pub async fn get_requied_space(&mut self) -> Result<i64, Error> {
         let report = self.download_report.take().unwrap();
         let mut size_total: i64 = 0;
         // Since we want to allow the game to be playable after pausing the update
         // we are not subtracting deleted files sizes
         for list in &report.download {
             if let Some(sfc) = &list.sfc {
-                size_total += sfc.chunks().first().unwrap().size();
+                let file_root = self.get_file_root(false, false);
+                let chunk = sfc.chunks().first().unwrap();
+                let file_path = file_root.join(chunk.md5());
+                let status = self.get_file_status(&file_path);
+                if matches!(status, progress::DownloadFileStatus::NotInitialized) {
+                    size_total += sfc.chunks().first().unwrap().size();
+                }
             }
             for entry in &list.files {
-                size_total += entry.size();
+                if entry.is_dir() {
+                    continue;
+                }
+                let file_root = self.get_file_root(entry.is_support(), false);
+                let file_path = file_root.join(entry.path());
+                let status = self.get_file_status(&file_path);
+
+                if matches!(status, progress::DownloadFileStatus::NotInitialized) {
+                    size_total += entry.size();
+                }
             }
         }
 
-        println!("{:?}", size_total);
+        for patch in &report.patches {
+            let file_root = self.get_file_root(false, false);
+            let file_path = file_root.join(patch.diff.path());
+            let status = self.get_file_status(&file_path);
+            if matches!(status, progress::DownloadFileStatus::NotInitialized) {
+                size_total += patch.diff.size() + patch.destination_file.size();
+            }
+        }
+
         self.download_report = Some(report);
-        Ok(())
+        Ok(size_total)
     }
 
-    fn get_file_root(&self, is_support: bool) -> &PathBuf {
-        if is_support {
+    fn get_file_root(&self, is_support: bool, final_destination: bool) -> &PathBuf {
+        if self.old_manifest.is_some() && !final_destination {
+            &self.tmp_path
+        } else if is_support {
             &self.support_path
         } else {
             &self.install_path
@@ -370,6 +419,11 @@ impl Downloader {
         if allocation_file.exists() {
             progress::DownloadFileStatus::Allocated
         } else {
+            let diff_file = format!("{}.diff", path.to_str().unwrap());
+            let diff_file = PathBuf::from(diff_file);
+            if diff_file.exists() {
+                return progress::DownloadFileStatus::PatchDownloaded;
+            }
             progress::DownloadFileStatus::NotInitialized
         }
     }
@@ -398,22 +452,24 @@ impl Downloader {
         let report = self.download_report.clone().unwrap();
         let mut new_symlinks: Vec<(String, String)> = Vec::new();
         let mut ready_files: HashSet<String> = HashSet::new();
+        let mut ready_patches: HashSet<String> = HashSet::new();
         let secure_links: Arc<Mutex<HashMap<String, Vec<Endpoint>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        if !self.install_path.exists() {
-            fs::create_dir_all(&self.install_path)
-                .await
-                .map_err(io_error)?;
+        let install_root = self.get_file_root(false, false);
+        if !install_root.exists() {
+            fs::create_dir_all(install_root).await.map_err(io_error)?;
         }
 
+        // Allocate disk space and generate secure links
         for file_list in &report.download {
             if let Some(sfc) = &file_list.sfc {
                 if sfc.chunks().len() != 1 {
                     log::warn!("sfc chunk count != 1");
                 }
                 let chunk = sfc.chunks().first().unwrap();
-                let file_path = self.install_path.join(chunk.md5());
+                let install_root = self.get_file_root(false, false);
+                let file_path = install_root.join(chunk.md5());
                 let size = *chunk.size();
                 match self.get_file_status(&file_path) {
                     progress::DownloadFileStatus::NotInitialized
@@ -428,22 +484,18 @@ impl Downloader {
                             .map_err(io_error)?;
                         utils::allocate(file_handle, size).await?;
                     }
-                    progress::DownloadFileStatus::Done => {
+                    _ => {
                         ready_files.insert(chunk.md5().clone());
                     }
                 }
             }
-            let mut contains_patches: bool = false;
             for entry in &file_list.files {
-                if self.cancellation_token.is_cancelled() {
-                    return Err(cancelled_error());
-                }
                 // TODO: Normalize the path to account for existing files on
                 // case sensitive file systems
                 // e.g Binaries/Game.exe -> binaries/Game.exe
                 // In the future detect ext4 case-folding and use that as well
                 let entry_path = entry.path();
-                let entry_root = self.get_file_root(entry.is_support());
+                let entry_root = self.get_file_root(entry.is_support(), false);
                 let file_path = entry_root.join(&entry_path);
                 if entry.is_dir() {
                     fs::create_dir_all(file_path).await.map_err(io_error)?;
@@ -453,10 +505,6 @@ impl Downloader {
                 let file_parent = file_path.parent().unwrap();
                 if !file_parent.exists() {
                     fs::create_dir_all(&file_parent).await.map_err(io_error)?;
-                }
-
-                if matches!(entry, DepotEntry::V2(v2::DepotEntry::Diff(_))) {
-                    contains_patches = true;
                 }
 
                 let file_size = entry.size();
@@ -476,6 +524,9 @@ impl Downloader {
                         DepotEntry::V2(v2::DepotEntry::Link(link)) => {
                             let link_path = link.path();
                             let target_path = link.target();
+                            let link_root = self.get_file_root(false, true);
+                            let link_path = link_root.join(link_path);
+                            let link_path = link_path.to_str().unwrap();
                             new_symlinks.push((link_path.to_owned(), target_path.to_owned()));
                         }
 
@@ -497,21 +548,14 @@ impl Downloader {
                             .map_err(io_error)?;
                         utils::allocate(file_handle, file_size).await?;
                     }
-                    progress::DownloadFileStatus::Done => {
+                    _ => {
                         ready_files.insert(entry_path.clone());
                     }
                 }
             }
+
             let mut secure_links = secure_links.lock().await;
-            let mut product_id = file_list.product_id.clone();
-            if contains_patches {
-                product_id.push_str("patch");
-            }
-            let root = if contains_patches {
-                "/patches/store"
-            } else {
-                ""
-            };
+            let product_id = &file_list.product_id;
 
             let path = if manifest_version == 2 {
                 "/".to_owned()
@@ -519,7 +563,7 @@ impl Downloader {
                 format!("/windows/{}", timestamp.unwrap())
             };
 
-            if !secure_links.contains_key(&product_id) {
+            if !secure_links.contains_key(product_id) {
                 let endpoints = if product_id == "dependencies" {
                     secure_link::get_dependencies_link(self.core.reqwest_client()).await?
                 } else {
@@ -527,14 +571,71 @@ impl Downloader {
                     secure_link::get_secure_link(
                         self.core.reqwest_client(),
                         manifest_version,
-                        &product_id,
+                        product_id,
                         &token,
                         &path,
-                        root,
+                        "",
                     )
                     .await?
                 };
                 secure_links.insert(product_id.clone(), endpoints);
+            }
+        }
+
+        for patch in &report.patches {
+            let entry = &patch.diff;
+            let entry_path = entry.path();
+            let entry_root = self.get_file_root(entry.is_support(), false);
+            let file_path = entry_root.join(&entry_path);
+            let file_parent = file_path.parent().unwrap();
+            if !file_parent.exists() {
+                fs::create_dir_all(&file_parent).await.map_err(io_error)?;
+            }
+            let product_id = format!("{}patch", patch.product_id);
+
+            let mut secure_links = secure_links.lock().await;
+            if !secure_links.contains_key(&product_id) {
+                let token = self.core.obtain_galaxy_token().await?;
+                let endpoints = secure_link::get_secure_link(
+                    self.core.reqwest_client(),
+                    manifest_version,
+                    &product_id,
+                    &token,
+                    "/",
+                    "/patches/store",
+                )
+                .await?;
+                secure_links.insert(product_id.clone(), endpoints);
+            }
+
+            match self.get_file_status(&file_path) {
+                progress::DownloadFileStatus::NotInitialized
+                | progress::DownloadFileStatus::Allocated => {
+                    let file_path = file_path.to_str().unwrap();
+                    let allocation_file = format!("{}.diff.download", file_path);
+                    let file_handle = fs::OpenOptions::new()
+                        .create(true)
+                        .truncate(false)
+                        .write(true)
+                        .open(allocation_file)
+                        .await
+                        .map_err(io_error)?;
+                    utils::allocate(file_handle, patch.diff.size()).await?;
+                    let file_handle = fs::OpenOptions::new()
+                        .create(true)
+                        .truncate(false)
+                        .write(true)
+                        .open(format!("{}.patched", file_path))
+                        .await
+                        .map_err(io_error)?;
+                    utils::allocate(file_handle, patch.destination_file.size()).await?;
+                }
+                progress::DownloadFileStatus::Done => {
+                    ready_files.insert(entry_path.clone());
+                }
+                progress::DownloadFileStatus::PatchDownloaded => {
+                    ready_patches.insert(entry_path.clone());
+                }
             }
         }
 
@@ -545,11 +646,12 @@ impl Downloader {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<()>();
         let mut handles: Vec<_> = Vec::new();
 
+        // Spawn download tasks
         for list in &report.download {
             if let Some(sfc) = &list.sfc {
                 let chunk = sfc.chunks().first().unwrap();
                 if !ready_files.contains(chunk.md5()) {
-                    let entry_root = self.get_file_root(false);
+                    let entry_root = self.get_file_root(false, false);
                     let file_path = entry_root.join(chunk.md5());
 
                     let product_id = list.product_id.clone();
@@ -591,7 +693,7 @@ impl Downloader {
                 if ready_files.contains(&file_path) || file.is_dir() {
                     continue;
                 }
-                let root = self.get_file_root(file.is_support());
+                let root = self.get_file_root(file.is_support(), false);
                 let file_path = root.join(file_path);
                 match file {
                     DepotEntry::V2(v2_entry) => {
@@ -658,16 +760,54 @@ impl Downloader {
             }
         }
 
+        for patch in &report.patches {
+            let file = &patch.diff;
+            let entry_path = file.path();
+            if ready_patches.contains(&entry_path) {
+                continue;
+            }
+            let entry_path = format!("{}.diff", entry_path);
+            let entry_root = self.get_file_root(file.is_support(), false);
+            let file_path = entry_root.join(&entry_path);
+
+            let file_semaphore = file_semaphore.clone();
+            let secure_links = secure_links.clone();
+
+            let chunk_semaphore = chunk_semaphore.clone();
+            let reqwest_client = self.core.reqwest_client().clone();
+            let v2_entry = file.clone();
+            let tx = tx.clone();
+            let product_id = format!("{}patch", patch.product_id);
+            handles.push(tokio::spawn(async move {
+                let file_permit = file_semaphore.clone().acquire_owned().await.unwrap();
+                let secure_links = secure_links.lock().await;
+                let endpoints = secure_links.get(&product_id).unwrap().clone();
+                drop(secure_links);
+
+                worker::v2(
+                    file_permit,
+                    reqwest_client,
+                    chunk_semaphore,
+                    endpoints,
+                    v2_entry,
+                    file_path,
+                    tx,
+                )
+                .await
+            }));
+        }
+
         futures::future::try_join_all(handles)
             .await
             .map_err(task_error)?;
 
         // Finalize the download
 
+        // Extract the small file container
         for list in &report.download {
             if let Some(sfc) = &list.sfc {
                 let chunk = sfc.chunks().first().unwrap();
-                let entry_root = self.get_file_root(false);
+                let entry_root = self.get_file_root(false, false);
                 let sfc_path = entry_root.join(chunk.md5());
 
                 let mut sfc_handle = fs::OpenOptions::new()
@@ -680,7 +820,7 @@ impl Downloader {
                     if let DepotEntry::V2(v2::DepotEntry::File(v2_file)) = &file {
                         if let Some(sfc_ref) = &v2_file.sfc_ref {
                             let file_path = file.path();
-                            let entry_root = self.get_file_root(file.is_support());
+                            let entry_root = self.get_file_root(file.is_support(), false);
                             let file_path = entry_root.join(file_path);
                             if matches!(
                                 self.get_file_status(&file_path),
@@ -719,13 +859,96 @@ impl Downloader {
             }
         }
 
+        // Patch files
+        for patch in &report.patches {
+            if let v2::DepotEntry::Diff(_diff) = &patch.diff {
+                let file_path = patch.diff.path();
+                let tmp_root = self.get_file_root(false, false);
+                let dst_root = self.get_file_root(false, true);
+
+                let diff_path = format!("{}.diff", file_path);
+
+                let source_file_path = dst_root.join(&file_path);
+                let diff_file_path = tmp_root.join(diff_path);
+                let target_file_path = tmp_root.join(format!("{}.patched", file_path));
+
+                let input_file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .open(&diff_file_path)
+                    .map_err(io_error)?;
+
+                let src_file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .open(source_file_path)
+                    .map_err(io_error)?;
+
+                let target_file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(false)
+                    .open(&target_file_path)
+                    .map_err(io_error)?;
+
+                tokio::task::spawn_blocking(|| {
+                    patching::patch_file(input_file, src_file, target_file)
+                })
+                .await
+                .unwrap()?;
+                fs::rename(target_file_path, tmp_root.join(file_path))
+                    .await
+                    .map_err(io_error)?;
+                fs::remove_file(diff_file_path).await.map_err(io_error)?;
+            }
+        }
+
+        // Move tmp files to their destination
+        if self.old_manifest.is_some() {
+            for list in &report.download {
+                for file in &list.files {
+                    let file_path = file.path();
+                    let tmp_entry_root = self.get_file_root(file.is_support(), false);
+                    let dst_entry_root = self.get_file_root(file.is_support(), true);
+
+                    let final_path = dst_entry_root.join(&file_path);
+
+                    let parent = final_path.parent().unwrap();
+                    if !parent.exists() {
+                        fs::create_dir_all(parent).await.map_err(io_error)?;
+                    }
+
+                    fs::rename(tmp_entry_root.join(&file_path), final_path)
+                        .await
+                        .map_err(io_error)?;
+                }
+            }
+            for entry in &report.patches {
+                let file = &entry.diff;
+                let file_path = file.path();
+                let tmp_entry_root = self.get_file_root(file.is_support(), false);
+                let dst_entry_root = self.get_file_root(file.is_support(), true);
+
+                let final_path = dst_entry_root.join(&file_path);
+
+                let parent = final_path.parent().unwrap();
+                if !parent.exists() {
+                    fs::create_dir_all(parent).await.map_err(io_error)?;
+                }
+
+                fs::rename(tmp_entry_root.join(&file_path), final_path)
+                    .await
+                    .map_err(io_error)?;
+            }
+            let tmp_root = self.get_file_root(false, false);
+            fs::remove_dir_all(tmp_root).await.map_err(io_error)?;
+        }
+
         for (source, target) in &new_symlinks {
-            utils::symlink(&self.install_path, source, target)?;
+            utils::symlink(source, target)?;
         }
 
         for file in &report.deleted {
             let file_path = file.path();
-            let root = self.get_file_root(file.is_support());
+            let root = self.get_file_root(file.is_support(), true);
             let file_path = root.join(file_path);
             if file_path.exists() {
                 fs::remove_file(file_path).await.map_err(io_error)?;

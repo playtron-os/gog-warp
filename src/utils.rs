@@ -17,7 +17,7 @@ pub fn assemble_url(endpoint: &Endpoint, path: &str) -> String {
     let mut url = endpoint.url_format.clone();
 
     if endpoint.parameters().is_empty() {
-        url.push_str("/");
+        url.push('/');
         url.push_str(path);
         return url;
     }
@@ -25,7 +25,7 @@ pub fn assemble_url(endpoint: &Endpoint, path: &str) -> String {
     for (param, value) in endpoint.parameters.iter() {
         let mut url_param = String::from("{");
         url_param.push_str(param);
-        url_param.push_str("}");
+        url_param.push('}');
 
         let mut new_value = match value {
             serde_json::Value::String(v) => v.to_owned(),
@@ -34,7 +34,7 @@ pub fn assemble_url(endpoint: &Endpoint, path: &str) -> String {
         };
 
         if param == "path" {
-            new_value.push_str("/");
+            new_value.push('/');
             new_value.push_str(path);
         }
 

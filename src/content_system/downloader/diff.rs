@@ -5,8 +5,8 @@ use crate::content_system::types::{traits::EntryUtils, v1, v2, DepotEntry, FileL
 #[derive(Debug, Clone)]
 pub struct Patch {
     pub(crate) product_id: String,
-    pub(crate) diff: DepotEntry,
-    pub(crate) destination_file: DepotEntry,
+    pub(crate) diff: v2::DepotEntry,
+    pub(crate) destination_file: v2::DepotEntry,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -15,7 +15,6 @@ pub struct DiffReport {
     pub(crate) patches: Vec<Patch>,
     pub(crate) directories: Vec<DepotEntry>,
     pub(crate) deleted: Vec<DepotEntry>,
-    size_diff: i64,
 }
 
 fn map_list(lists: &Vec<FileList>) -> HashMap<String, &DepotEntry> {
@@ -35,17 +34,33 @@ pub fn diff(
 ) -> DiffReport {
     let new = map_list(&new_entries);
     let old = map_list(&old_entries);
-    let patches_set = map_list(&patches);
 
     let mut deleted_paths: HashSet<String> = HashSet::new();
     let mut final_download: HashSet<String> = HashSet::from_iter(new.keys().cloned());
-    let mut patched_files: HashMap<String, DepotEntry> = HashMap::new();
+    let mut patched_files: HashSet<String> = HashSet::new();
 
     // Prepare report
     let mut report = DiffReport::default();
 
-    for patch in patches_set.keys() {
-        final_download.remove(patch);
+    if !patches.is_empty() {
+        for list in patches {
+            for patch in list.files {
+                if let DepotEntry::V2(v2_entry) = patch {
+                    let file_path = v2_entry.path();
+                    let new_file = new.get(&file_path.to_lowercase()).cloned().unwrap();
+                    patched_files.insert(file_path.to_lowercase());
+
+                    if let DepotEntry::V2(v2_file) = new_file {
+                        let patch_report = Patch {
+                            product_id: list.product_id.clone(),
+                            diff: v2_entry,
+                            destination_file: v2_file.to_owned(),
+                        };
+                        report.patches.push(patch_report);
+                    }
+                }
+            }
+        }
     }
 
     for old_file in old.keys() {
@@ -117,9 +132,8 @@ pub fn diff(
                     continue;
                 }
 
-                // If there was a patch for this path, skip it
-                if patches_set.contains_key(new_path) {
-                    patched_files.insert(new_path.clone(), (*new_file).clone());
+                if patched_files.contains(new_path) {
+                    final_download.remove(new_path);
                     continue;
                 }
 
@@ -128,7 +142,7 @@ pub fn diff(
                     && of.chunks().len() == 1
                     && nf.chunks().first().unwrap().md5() == of.chunks().first().unwrap().md5()
                 {
-                    final_download.remove(&nf.path().to_lowercase());
+                    final_download.remove(new_path);
                     continue;
                 }
 
@@ -175,25 +189,6 @@ pub fn diff(
         for entry in file_list.files {
             if deleted_paths.contains(&entry.path().to_lowercase()) {
                 report.deleted.push(entry);
-            }
-        }
-    }
-
-    for list in patches {
-        for patch in list.files {
-            if let DepotEntry::V2(v2::DepotEntry::Diff(_)) = patch {
-                let file_path = patch.path();
-                let new_file = patched_files
-                    .get(&file_path.to_lowercase())
-                    .cloned()
-                    .unwrap();
-
-                let patch_report = Patch {
-                    product_id: list.product_id.clone(),
-                    diff: patch,
-                    destination_file: new_file,
-                };
-                report.patches.push(patch_report);
             }
         }
     }

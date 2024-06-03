@@ -87,9 +87,9 @@ pub async fn v2(
     destination_path: PathBuf,
     result_report: UnboundedSender<()>,
 ) -> EmptyResult {
-    let chunks = match entry {
-        v2::DepotEntry::File(file) => file.chunks,
-        v2::DepotEntry::Diff(diff) => diff.chunks,
+    let chunks = match &entry {
+        v2::DepotEntry::File(file) => file.chunks.clone(),
+        v2::DepotEntry::Diff(diff) => diff.chunks.clone(),
         _ => return Ok(()),
     };
 
@@ -146,17 +146,13 @@ pub async fn v2(
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        file_handle
-            .write_all(&chunk)
-            .await
-            .expect("Failed to write");
+        file_handle.write_all(&chunk).await.map_err(io_error)?;
     }
 
     drop(file_handle);
 
     tokio::fs::rename(download_path, destination_path)
         .await
-        .expect("Failed to rename");
-
+        .map_err(io_error)?;
     Ok(())
 }

@@ -176,7 +176,8 @@ impl Manifest {
     /// based on wanted language and dlcs
     /// This consists of game files alone
     /// The actual download size may slightly differ depending on the implementation
-    // TODO: Mention dependencies system
+    ///
+    /// This size doesn't account for game dependencies [`crate::content_system::dependencies`]
     pub fn install_size<I, V>(&self, language: &String, dlcs: I) -> (i64, i64)
     where
         I: IntoIterator<Item = V> + Copy,
