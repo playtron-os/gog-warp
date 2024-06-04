@@ -6,7 +6,7 @@ use tokio::io::AsyncReadExt;
 use super::languages;
 use super::types::{v2, DepotEntry, FileList};
 use crate::constants::domains::GOG_CDN;
-use crate::errors::{json_error, request_error, zlib_error};
+use crate::errors::{request_error, serde_error, zlib_error};
 
 pub const DEPENDENCIES_URL: &str =
     "https://content-system.gog.com/dependencies/repository?generation=2";
@@ -55,10 +55,11 @@ impl DependenciesManifest {
                 zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
 
                 let json_data: v2::DepotDetails =
-                    serde_json::from_slice(&buffer).map_err(json_error)?;
+                    serde_json::from_slice(&buffer).map_err(serde_error)?;
                 let (entries, _sfc) = json_data.depot.dissolve();
                 let entries = entries.into_iter().map(DepotEntry::V2).collect();
-                let f_list = FileList::new("dependencies".to_owned(), entries);
+                let mut f_list = FileList::new(depot.dependency_id.clone(), entries);
+                f_list.is_dependency = true;
                 lists.push(f_list);
             }
         }
@@ -112,6 +113,6 @@ pub async fn get_manifest(reqwest_client: Client) -> Result<DependenciesManifest
     let mut zlib = ZlibDecoder::new(&manifest_raw[..]);
     let mut buffer = Vec::new();
     zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
-    let manifest: DependenciesManifest = serde_json::from_slice(&buffer).map_err(json_error)?;
+    let manifest: DependenciesManifest = serde_json::from_slice(&buffer).map_err(serde_error)?;
     Ok(manifest)
 }

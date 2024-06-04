@@ -3,7 +3,7 @@ use crate::auth::types::Token;
 use crate::constants::{GALAXY_CLIENT_ID, GALAXY_CLIENT_SECRET};
 use crate::content_system::dependencies::{self, DependenciesManifest};
 use crate::content_system::types::{Build, BuildResponse, Manifest, Platform};
-use crate::errors::{json_error, maximum_retries_error, zlib_error};
+use crate::errors::{maximum_retries_error, serde_error, zlib_error};
 use crate::library::types::GalaxyLibraryItem;
 use crate::user::types::UserData;
 use crate::{auth, content_system, errors, user};
@@ -42,7 +42,7 @@ impl Core {
 
     pub fn deserialize_tokens(&self, new_tokens: &str) -> errors::EmptyResult {
         let new_tokens: HashMap<String, Token> =
-            serde_json::from_str(new_tokens).map_err(errors::json_error)?;
+            serde_json::from_str(new_tokens).map_err(errors::serde_error)?;
         let mut tokens = self.tokens.lock();
         tokens.clear();
         tokens.extend(new_tokens);
@@ -51,7 +51,7 @@ impl Core {
 
     pub fn serialize_tokens(&self) -> Result<String, errors::Error> {
         let tokens = self.tokens.lock();
-        serde_json::to_string(&*tokens).map_err(errors::json_error)
+        serde_json::to_string(&*tokens).map_err(errors::serde_error)
     }
 
     fn get_token(&self, client_id: &str) -> Option<Token> {
@@ -195,7 +195,7 @@ impl Core {
                     if let Ok(data) = res.bytes().await {
                         if *build.generation() == 1 {
                             let manifest: Manifest =
-                                serde_json::from_slice(&data).map_err(json_error)?;
+                                serde_json::from_slice(&data).map_err(serde_error)?;
                             return Ok(manifest);
                         }
                         let mut zlib =
@@ -203,7 +203,7 @@ impl Core {
                         let mut buffer = Vec::new();
                         zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
                         let manifest: Manifest =
-                            serde_json::from_slice(buffer.as_slice()).map_err(json_error)?;
+                            serde_json::from_slice(buffer.as_slice()).map_err(serde_error)?;
                         return Ok(manifest);
                     }
                 }

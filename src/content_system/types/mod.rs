@@ -9,7 +9,7 @@ use tokio::io::AsyncReadExt;
 
 use crate::{
     constants::domains::GOG_CDN,
-    errors::{json_error, request_error, zlib_error},
+    errors::{request_error, serde_error, zlib_error},
 };
 
 pub(crate) mod traits;
@@ -19,6 +19,7 @@ pub mod v2;
 #[derive(Debug, Clone)]
 pub struct FileList {
     pub(crate) product_id: String,
+    pub(crate) is_dependency: bool,
     pub(crate) files: Vec<DepotEntry>,
     pub(crate) sfc: Option<v2::SmallFilesContainer>,
 }
@@ -27,8 +28,17 @@ impl FileList {
     pub fn new(product_id: String, files: Vec<DepotEntry>) -> Self {
         Self {
             product_id,
+            is_dependency: false,
             files,
             sfc: None,
+        }
+    }
+
+    pub fn product_id(&self) -> String {
+        if self.is_dependency {
+            String::from("dependency")
+        } else {
+            self.product_id.clone()
         }
     }
 }
@@ -46,6 +56,14 @@ impl traits::EntryUtils for DepotEntry {
             Self::V2(v2) => traits::EntryUtils::path(v2),
         }
     }
+
+    fn compressed_size(&self) -> i64 {
+        match self {
+            Self::V1(v1) => traits::EntryUtils::compressed_size(v1),
+            Self::V2(v2) => traits::EntryUtils::compressed_size(v2),
+        }
+    }
+
     fn size(&self) -> i64 {
         match self {
             Self::V1(v1) => traits::EntryUtils::size(v1),
@@ -332,7 +350,7 @@ impl Manifest {
                     zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
 
                     let json_data: v2::DepotDetails =
-                        serde_json::from_slice(&buffer).map_err(json_error)?;
+                        serde_json::from_slice(&buffer).map_err(serde_error)?;
                     let (entries, sfc) = json_data.depot.dissolve();
                     let entries = entries.into_iter().map(DepotEntry::V2).collect();
                     let mut f_list = FileList::new(depot.product_id().to_owned(), entries);
@@ -397,8 +415,8 @@ pub struct Endpoint {
     pub(crate) fallback_only: bool,
 }
 
-#[derive(Serialize, Deserialize, Getters, Clone, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct SizeInfo {
-    disk_size: u64,
-    download_size: u64,
+    pub disk_size: u64,
+    pub download_size: u64,
 }

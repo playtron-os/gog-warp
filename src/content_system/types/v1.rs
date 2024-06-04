@@ -87,6 +87,9 @@ impl super::traits::EntryUtils for DepotEntry {
         .trim_matches('/')
         .to_string()
     }
+    fn compressed_size(&self) -> i64 {
+        self.size()
+    }
     fn size(&self) -> i64 {
         match self {
             Self::File(f) => f.size,

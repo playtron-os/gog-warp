@@ -1,10 +1,14 @@
+use tokio::sync::mpsc::UnboundedSender;
+
 use crate::errors::{io_error, xdelta_error, EmptyResult};
 use crate::xdelta::*;
 use std::fs::File;
 use std::io::{Read, Seek, Write};
 use std::mem;
 
-const BUFFER_SIZE: u32 = 1 << 18;
+use super::progress::WorkerUpdate;
+
+const BUFFER_SIZE: u32 = 1 << 18; // 256KB, the default for xdelta3 is 16KB
 
 struct Xd3Stream {
     inner: xd3_stream,
@@ -37,7 +41,12 @@ impl Drop for Xd3Stream {
     }
 }
 
-pub fn patch_file(mut input: File, mut src: File, mut out: File) -> EmptyResult {
+pub fn patch_file(
+    mut input: File,
+    mut src: File,
+    mut out: File,
+    result_report: UnboundedSender<WorkerUpdate>,
+) -> EmptyResult {
     let mut stream: Xd3Stream = Xd3Stream::new();
     let mut source: xd3_source = unsafe { mem::zeroed() };
 
@@ -83,6 +92,7 @@ pub fn patch_file(mut input: File, mut src: File, mut out: File) -> EmptyResult 
                             stream.inner.avail_out as usize,
                         )
                     };
+                    let _ = result_report.send(WorkerUpdate::Write(output_buffer.len()));
                     out.write_all(output_buffer).map_err(io_error)?;
                     stream.inner.avail_out = 0;
                 }

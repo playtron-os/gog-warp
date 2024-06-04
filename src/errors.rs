@@ -8,7 +8,7 @@ pub enum ErrorKind {
     NotLoggedIn,
     Unauthorized,
     Cancelled,
-    Json,
+    Serde,
     Request,
     Task,
     Io,
@@ -40,7 +40,7 @@ impl Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
-            ErrorKind::Json => f.write_str("json serialization error"),
+            ErrorKind::Serde => f.write_str("serialization error"),
             ErrorKind::NotLoggedIn => f.write_str("not logged-in error"),
             ErrorKind::Unauthorized => f.write_str("token is no longer valid"),
             ErrorKind::Request => f.write_str("network request error"),
@@ -99,8 +99,8 @@ pub(crate) fn maximum_retries_error() -> Error {
     Error::new(ErrorKind::MaximumRetries, None::<BoxError>)
 }
 
-pub(crate) fn json_error<E: Into<BoxError>>(err: E) -> Error {
-    Error::new(ErrorKind::Json, Some(err))
+pub(crate) fn serde_error<E: Into<BoxError>>(err: E) -> Error {
+    Error::new(ErrorKind::Serde, Some(err))
 }
 
 pub(crate) fn request_error<E: Into<BoxError>>(err: E) -> Error {

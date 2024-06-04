@@ -79,6 +79,21 @@ impl super::traits::EntryUtils for DepotEntry {
         .trim_matches('/')
         .to_string()
     }
+
+    fn compressed_size(&self) -> i64 {
+        match self {
+            Self::File(f) => f
+                .chunks()
+                .iter()
+                .fold(0, |acc, ch| acc + ch.compressed_size),
+            Self::Diff(f) => f
+                .chunks()
+                .iter()
+                .fold(0, |acc, ch| acc + ch.compressed_size),
+            _ => 0,
+        }
+    }
+
     fn size(&self) -> i64 {
         match self {
             Self::File(f) => f.chunks().iter().fold(0, |acc, ch| acc + ch.size),

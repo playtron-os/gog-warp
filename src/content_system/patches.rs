@@ -6,7 +6,7 @@ use tokio::io::AsyncReadExt;
 use url::Url;
 
 use crate::constants::domains::{GOG_CDN, GOG_CONTENT_SYSTEM};
-use crate::errors::{json_error, request_error, zlib_error};
+use crate::errors::{request_error, serde_error, zlib_error};
 
 use super::types::v2::{DepotDetails, ManifestDepot};
 use super::types::{DepotEntry, FileList, Manifest};
@@ -103,8 +103,13 @@ pub async fn get_patches(
         let mut zlib = ZlibDecoder::new(&data[..]);
         let mut buffer = Vec::new();
         zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
-        serde_json::from_slice(&buffer).map_err(json_error)?
+        serde_json::from_slice(&buffer).map_err(serde_error)?
     };
+
+    // Assert that the algorithm is the one we support
+    if depots.algorithm != "xdelta3" {
+        return Ok(None);
+    }
 
     let wanted_depots: Vec<&ManifestDepot> = depots
         .depots()
@@ -135,7 +140,7 @@ pub async fn get_patches(
             let mut zlib = ZlibDecoder::new(&data[..]);
             let mut buffer = Vec::new();
             zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
-            serde_json::from_slice(&buffer).map_err(json_error)?
+            serde_json::from_slice(&buffer).map_err(serde_error)?
         };
 
         let patches = details

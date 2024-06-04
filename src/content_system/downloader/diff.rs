@@ -15,6 +15,7 @@ pub struct DiffReport {
     pub(crate) patches: Vec<Patch>,
     pub(crate) directories: Vec<DepotEntry>,
     pub(crate) deleted: Vec<DepotEntry>,
+    pub(crate) number_of_files: u32,
 }
 
 fn map_list(lists: &Vec<FileList>) -> HashMap<String, &DepotEntry> {
@@ -62,6 +63,8 @@ pub fn diff(
             }
         }
     }
+
+    report.number_of_files += report.patches.len() as u32;
 
     for old_file in old.keys() {
         if !new.contains_key(old_file) {
@@ -164,6 +167,7 @@ pub fn diff(
 
     for file_list in new_entries {
         let mut new_list = FileList::new(file_list.product_id, Vec::new());
+        new_list.is_dependency = file_list.is_dependency;
         let mut needs_sfc = false;
 
         for entry in file_list.files {
@@ -180,6 +184,7 @@ pub fn diff(
             new_list.sfc = file_list.sfc;
         }
         if !new_list.files.is_empty() {
+            report.number_of_files += new_list.files.len() as u32;
             report.download.push(new_list)
         }
     }

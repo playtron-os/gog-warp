@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::content_system::secure_link;
-use crate::errors::{cancelled_error, task_error};
+use crate::errors::{cancelled_error, serde_error, task_error};
 use crate::{
     errors::{dbuilder_error, io_error, not_ready_error},
     Core, Error,
@@ -11,8 +11,11 @@ use crate::{
 
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
+
+use self::progress::{load_chunk_state, DownloadState, WorkerUpdate};
 
 use super::dependencies::DependenciesManifest;
 use super::types::{traits::EntryUtils, Endpoint, Manifest};
@@ -95,6 +98,8 @@ impl Builder {
             old_manifest.clone_from(&manifest);
         }
 
+        let (progress_channel_sender, progress_channel_receiver) = tokio::sync::mpsc::channel(5);
+
         Ok(Downloader {
             core,
             manifest,
@@ -109,11 +114,14 @@ impl Builder {
             verify,
             build_id,
             prev_build_id,
+            progress_channel_sender,
+            progress_channel_receiver: Some(progress_channel_receiver),
             cancellation_token: CancellationToken::new(),
             global_dependencies,
             old_global_dependencies,
             dependency_manifest,
             download_report: None,
+            path_lists: None,
             max_speed: Mutex::new(-1),
         })
     }
@@ -259,8 +267,12 @@ pub struct Downloader {
     /// Global dependencies to upgrade from
     old_global_dependencies: Vec<String>,
 
+    progress_channel_sender: Sender<DownloadState>,
+    progress_channel_receiver: Option<Receiver<DownloadState>>,
+
     cancellation_token: CancellationToken,
     download_report: Option<diff::DiffReport>,
+    path_lists: Option<HashMap<String, HashSet<String>>>,
     max_speed: Mutex<i32>,
 }
 
@@ -274,12 +286,23 @@ impl Downloader {
         self.cancellation_token.clone()
     }
 
+    /// Returns a receiver for progress events
+    /// leaving None in it's place, meaning this
+    /// function will return Some only once
+    pub fn take_progress_reciever(&mut self) -> Option<Receiver<DownloadState>> {
+        self.progress_channel_receiver.take()
+    }
+
     pub async fn set_max_speed(&self, speed: i32) {
         *self.max_speed.lock().await = speed;
     }
 
     /// Fetches file lists and patches manifest
     pub async fn prepare(&mut self) -> Result<(), Error> {
+        let _ = self
+            .progress_channel_sender
+            .send(DownloadState::Preparing)
+            .await;
         // Get depots for main manifest
         let mut depots = match &self.manifest {
             Some(m) => {
@@ -351,12 +374,26 @@ impl Downloader {
         )
         .await?;
 
+        let mut manifest_paths: HashMap<String, HashSet<String>> = HashMap::new();
+        for depot in &depots {
+            let mut list = manifest_paths.remove(&depot.product_id).unwrap_or_default();
+            for file in &depot.files {
+                if file.is_support() {
+                    continue;
+                }
+                list.insert(file.path());
+            }
+            manifest_paths.insert(depot.product_id.clone(), list);
+        }
+
         let results = diff::diff(depots, old_depots, patches.unwrap_or_default());
         self.download_report = Some(results);
+        self.path_lists = Some(manifest_paths);
         Ok(())
     }
 
-    /// Return space required for operation to complete takes in account pre-allocated files
+    /// Return space required for operation to complete, takes in account pre-allocated files
+    /// You should check if you have enough space before calling `download`
     pub async fn get_requied_space(&mut self) -> Result<i64, Error> {
         let report = self.download_report.take().unwrap();
         let mut size_total: i64 = 0;
@@ -367,7 +404,7 @@ impl Downloader {
                 let file_root = self.get_file_root(false, false);
                 let chunk = sfc.chunks().first().unwrap();
                 let file_path = file_root.join(chunk.md5());
-                let status = self.get_file_status(&file_path);
+                let status = self.get_file_status(&file_path).await;
                 if matches!(status, progress::DownloadFileStatus::NotInitialized) {
                     size_total += sfc.chunks().first().unwrap().size();
                 }
@@ -378,7 +415,7 @@ impl Downloader {
                 }
                 let file_root = self.get_file_root(entry.is_support(), false);
                 let file_path = file_root.join(entry.path());
-                let status = self.get_file_status(&file_path);
+                let status = self.get_file_status(&file_path).await;
 
                 if matches!(status, progress::DownloadFileStatus::NotInitialized) {
                     size_total += entry.size();
@@ -389,7 +426,7 @@ impl Downloader {
         for patch in &report.patches {
             let file_root = self.get_file_root(false, false);
             let file_path = file_root.join(patch.diff.path());
-            let status = self.get_file_status(&file_path);
+            let status = self.get_file_status(&file_path).await;
             if matches!(status, progress::DownloadFileStatus::NotInitialized) {
                 size_total += patch.diff.size() + patch.destination_file.size();
             }
@@ -409,10 +446,20 @@ impl Downloader {
         }
     }
 
-    fn get_file_status(&self, path: &Path) -> progress::DownloadFileStatus {
+    async fn get_file_status(&self, path: &Path) -> progress::DownloadFileStatus {
         if path.exists() {
             return progress::DownloadFileStatus::Done;
         }
+        let state_file = format!("{}.state", path.to_str().unwrap());
+        let state_file_path = PathBuf::from(&state_file);
+
+        if state_file_path.exists() {
+            let file_state = load_chunk_state(&state_file).await;
+            if let Ok(file_state) = file_state {
+                return progress::DownloadFileStatus::Partial(file_state.chunks);
+            }
+        }
+
         let allocation_file = format!("{}.download", path.to_str().unwrap());
         let allocation_file = PathBuf::from(allocation_file);
 
@@ -461,7 +508,11 @@ impl Downloader {
             fs::create_dir_all(install_root).await.map_err(io_error)?;
         }
 
-        // Allocate disk space and generate secure links
+        let mut download_progress: progress::DownloadProgress = Default::default();
+
+        let mut allocated_files: u32 = 0;
+
+        // Allocate disk space, generate secure links and restore progress state
         for file_list in &report.download {
             if let Some(sfc) = &file_list.sfc {
                 if sfc.chunks().len() != 1 {
@@ -471,7 +522,9 @@ impl Downloader {
                 let install_root = self.get_file_root(false, false);
                 let file_path = install_root.join(chunk.md5());
                 let size = *chunk.size();
-                match self.get_file_status(&file_path) {
+                download_progress.total_download += *chunk.compressed_size() as u64;
+                download_progress.total_size += size as u64;
+                match self.get_file_status(&file_path).await {
                     progress::DownloadFileStatus::NotInitialized
                     | progress::DownloadFileStatus::Allocated => {
                         let download_path = format!("{}.download", file_path.to_str().unwrap());
@@ -485,6 +538,8 @@ impl Downloader {
                         utils::allocate(file_handle, size).await?;
                     }
                     _ => {
+                        download_progress.downloaded += *chunk.compressed_size() as u64;
+                        download_progress.written += *chunk.size() as u64;
                         ready_files.insert(chunk.md5().clone());
                     }
                 }
@@ -499,6 +554,7 @@ impl Downloader {
                 let file_path = entry_root.join(&entry_path);
                 if entry.is_dir() {
                     fs::create_dir_all(file_path).await.map_err(io_error)?;
+                    allocated_files += 1;
                     continue;
                 }
 
@@ -508,6 +564,17 @@ impl Downloader {
                 }
 
                 let file_size = entry.size();
+                let is_sfc_contained = if let DepotEntry::V2(v2::DepotEntry::File(f)) = &entry {
+                    f.sfc_ref.is_some()
+                } else {
+                    false
+                };
+
+                if !is_sfc_contained {
+                    download_progress.total_download += entry.compressed_size() as u64;
+                }
+                download_progress.total_size += file_size as u64;
+
                 if file_size == 0 {
                     match entry {
                         DepotEntry::V1(v1::DepotEntry::File(_))
@@ -532,10 +599,11 @@ impl Downloader {
 
                         _ => (),
                     }
+                    allocated_files += 1;
                     continue;
                 }
 
-                match self.get_file_status(&file_path) {
+                match self.get_file_status(&file_path).await {
                     progress::DownloadFileStatus::NotInitialized
                     | progress::DownloadFileStatus::Allocated => {
                         let allocation_file = format!("{}.download", file_path.to_str().unwrap());
@@ -548,14 +616,34 @@ impl Downloader {
                             .map_err(io_error)?;
                         utils::allocate(file_handle, file_size).await?;
                     }
+                    progress::DownloadFileStatus::Partial(chunks_state) => {
+                        if let DepotEntry::V2(v2::DepotEntry::File(f)) = entry {
+                            for (index, chunk) in f.chunks.iter().enumerate() {
+                                if *chunks_state.get(index).unwrap_or(&false) {
+                                    download_progress.downloaded += *chunk.compressed_size() as u64;
+                                    download_progress.written += *chunk.size() as u64;
+                                }
+                            }
+                        }
+                    }
                     _ => {
+                        if !is_sfc_contained {
+                            download_progress.downloaded += entry.compressed_size() as u64;
+                        }
+                        download_progress.written += file_size as u64;
                         ready_files.insert(entry_path.clone());
                     }
                 }
+                allocated_files += 1;
             }
+            let allocation_progress = allocated_files as f32 / report.number_of_files as f32;
+            let _ = self
+                .progress_channel_sender
+                .send(DownloadState::Allocating(allocation_progress))
+                .await;
 
             let mut secure_links = secure_links.lock().await;
-            let product_id = &file_list.product_id;
+            let product_id = file_list.product_id();
 
             let path = if manifest_version == 2 {
                 "/".to_owned()
@@ -563,22 +651,24 @@ impl Downloader {
                 format!("/windows/{}", timestamp.unwrap())
             };
 
-            if !secure_links.contains_key(product_id) {
-                let endpoints = if product_id == "dependencies" {
+            if let std::collections::hash_map::Entry::Vacant(e) =
+                secure_links.entry(product_id.clone())
+            {
+                let endpoints = if file_list.is_dependency {
                     secure_link::get_dependencies_link(self.core.reqwest_client()).await?
                 } else {
                     let token = self.core.obtain_galaxy_token().await?;
                     secure_link::get_secure_link(
                         self.core.reqwest_client(),
                         manifest_version,
-                        product_id,
+                        &product_id,
                         &token,
                         &path,
                         "",
                     )
                     .await?
                 };
-                secure_links.insert(product_id.clone(), endpoints);
+                e.insert(endpoints);
             }
         }
 
@@ -608,7 +698,11 @@ impl Downloader {
                 secure_links.insert(product_id.clone(), endpoints);
             }
 
-            match self.get_file_status(&file_path) {
+            download_progress.total_download += entry.compressed_size() as u64;
+            download_progress.total_size += entry.size() as u64;
+            download_progress.total_size += patch.destination_file.size() as u64;
+
+            match self.get_file_status(&file_path).await {
                 progress::DownloadFileStatus::NotInitialized
                 | progress::DownloadFileStatus::Allocated => {
                     let file_path = file_path.to_str().unwrap();
@@ -631,20 +725,65 @@ impl Downloader {
                     utils::allocate(file_handle, patch.destination_file.size()).await?;
                 }
                 progress::DownloadFileStatus::Done => {
+                    download_progress.downloaded += entry.compressed_size() as u64;
+                    download_progress.written += patch.destination_file.size() as u64;
                     ready_files.insert(entry_path.clone());
                 }
                 progress::DownloadFileStatus::PatchDownloaded => {
+                    download_progress.downloaded += entry.compressed_size() as u64;
                     ready_patches.insert(entry_path.clone());
+                }
+                progress::DownloadFileStatus::Partial(chunks_state) => {
+                    if let v2::DepotEntry::File(f) = entry {
+                        for (index, chunk) in f.chunks.iter().enumerate() {
+                            if *chunks_state.get(index).unwrap_or(&false) {
+                                download_progress.downloaded += *chunk.compressed_size() as u64;
+                                download_progress.written += *chunk.size() as u64;
+                            }
+                        }
+                    }
                 }
             }
         }
 
+        let download_progress = Arc::new(Mutex::new(download_progress));
+
         let file_semaphore = Arc::new(Semaphore::new(4));
         let chunk_semaphore = Arc::new(Semaphore::new(8));
 
-        // TODO: Handle download speed and progress reports
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-        let mut handles: Vec<_> = Vec::new();
+        // TODO: Handle download speed reports
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorkerUpdate>();
+        let mut handles = tokio::task::JoinSet::new();
+
+        let report_download_progress = download_progress.clone();
+        let progress_channel_sender = self.progress_channel_sender.clone();
+        let progress_report = tokio::spawn(async move {
+            let mut timestamp = tokio::time::Instant::now();
+            let one_sec = tokio::time::Duration::from_secs(1);
+            while let Some(message) = rx.recv().await {
+                let mut progress = report_download_progress.lock().await;
+                match message {
+                    WorkerUpdate::Download(size) => progress.downloaded += size as u64,
+                    WorkerUpdate::Write(size) => progress.written += size as u64,
+                }
+                if timestamp.elapsed() > tokio::time::Duration::from_millis(500) {
+                    timestamp = tokio::time::Instant::now();
+                    let _ = progress_channel_sender
+                        .send_timeout(
+                            DownloadState::Downloading((*progress).clone()),
+                            tokio::time::Duration::from_millis(500),
+                        )
+                        .await;
+                }
+            }
+            let progress = report_download_progress.lock().await;
+            let _ = progress_channel_sender
+                .send_timeout(DownloadState::Downloading((*progress).clone()), one_sec)
+                .await;
+            let _ = progress_channel_sender
+                .send_timeout(DownloadState::Finished, one_sec)
+                .await;
+        });
 
         // Spawn download tasks
         for list in &report.download {
@@ -654,7 +793,7 @@ impl Downloader {
                     let entry_root = self.get_file_root(false, false);
                     let file_path = entry_root.join(chunk.md5());
 
-                    let product_id = list.product_id.clone();
+                    let product_id = list.product_id();
                     let secure_links = secure_links.clone();
                     let chunk_semaphore = chunk_semaphore.clone();
                     let chunks = sfc.chunks().clone();
@@ -662,7 +801,7 @@ impl Downloader {
                     let path = chunk.md5().clone();
                     let reqwest_client = self.core.reqwest_client().clone();
                     let tx = tx.clone();
-                    handles.push(tokio::spawn(async move {
+                    handles.spawn(async move {
                         let file_permit = file_semaphore.acquire_owned().await.unwrap();
                         let secure_links = secure_links.lock().await;
                         let endpoints = secure_links.get(&product_id).unwrap().clone();
@@ -685,7 +824,7 @@ impl Downloader {
                             tx,
                         )
                         .await
-                    }));
+                    });
                 }
             }
             for file in &list.files {
@@ -713,8 +852,8 @@ impl Downloader {
                         let reqwest_client = self.core.reqwest_client().clone();
                         let v2_entry = v2_entry.clone();
                         let tx = tx.clone();
-                        let product_id = list.product_id.clone();
-                        handles.push(tokio::spawn(async move {
+                        let product_id = list.product_id();
+                        handles.spawn(async move {
                             let file_permit = file_semaphore.clone().acquire_owned().await.unwrap();
                             let secure_links = secure_links.lock().await;
                             let endpoints = secure_links.get(&product_id).unwrap().clone();
@@ -730,17 +869,17 @@ impl Downloader {
                                 tx,
                             )
                             .await
-                        }));
+                        });
                     }
                     DepotEntry::V1(v1_entry) => {
                         let file_semaphore = file_semaphore.clone();
                         let secure_links = secure_links.clone();
 
-                        let product_id = list.product_id.clone();
+                        let product_id = list.product_id();
                         let reqwest_client = self.core.reqwest_client().clone();
                         let v1_entry = v1_entry.clone();
                         let tx = tx.clone();
-                        handles.push(tokio::spawn(async move {
+                        handles.spawn(async move {
                             let file_permit = file_semaphore.clone().acquire_owned().await.unwrap();
                             let secure_links = secure_links.lock().await;
                             let endpoints = secure_links.get(&product_id).unwrap().clone();
@@ -754,7 +893,7 @@ impl Downloader {
                                 tx,
                             )
                             .await
-                        }));
+                        });
                     }
                 }
             }
@@ -778,7 +917,7 @@ impl Downloader {
             let v2_entry = file.clone();
             let tx = tx.clone();
             let product_id = format!("{}patch", patch.product_id);
-            handles.push(tokio::spawn(async move {
+            handles.spawn(async move {
                 let file_permit = file_semaphore.clone().acquire_owned().await.unwrap();
                 let secure_links = secure_links.lock().await;
                 let endpoints = secure_links.get(&product_id).unwrap().clone();
@@ -794,12 +933,25 @@ impl Downloader {
                     tx,
                 )
                 .await
-            }));
+            });
         }
 
-        futures::future::try_join_all(handles)
-            .await
-            .map_err(task_error)?;
+        loop {
+            tokio::select! {
+                result = handles.join_next() => {
+                    match result {
+                        Some(result) => {
+                            result.map_err(task_error)??;
+                        },
+                        None => break
+                    }
+                }
+                _ = self.cancellation_token.cancelled() => {
+                    handles.shutdown().await;
+                    return Err(cancelled_error());
+                }
+            }
+        }
 
         // Finalize the download
 
@@ -823,7 +975,7 @@ impl Downloader {
                             let entry_root = self.get_file_root(file.is_support(), false);
                             let file_path = entry_root.join(file_path);
                             if matches!(
-                                self.get_file_status(&file_path),
+                                self.get_file_status(&file_path).await,
                                 progress::DownloadFileStatus::Done
                             ) {
                                 continue;
@@ -845,6 +997,7 @@ impl Downloader {
                                 Vec::with_capacity((*sfc_ref.size()).try_into().unwrap());
                             sfc_handle.read_buf(&mut buffer).await.map_err(io_error)?;
                             file_handle.write_all(&buffer).await.map_err(io_error)?;
+                            let _ = tx.send(WorkerUpdate::Write(buffer.len()));
                             file_handle.flush().await.map_err(io_error)?;
 
                             drop(file_handle);
@@ -889,8 +1042,9 @@ impl Downloader {
                     .open(&target_file_path)
                     .map_err(io_error)?;
 
+                let tx = tx.clone();
                 tokio::task::spawn_blocking(|| {
-                    patching::patch_file(input_file, src_file, target_file)
+                    patching::patch_file(input_file, src_file, target_file, tx)
                 })
                 .await
                 .unwrap()?;
@@ -942,6 +1096,11 @@ impl Downloader {
             fs::remove_dir_all(tmp_root).await.map_err(io_error)?;
         }
 
+        drop(tx);
+        if let Err(err) = progress_report.await {
+            log::debug!("Failed to wait for the progress {}", err);
+        }
+
         for (source, target) in &new_symlinks {
             utils::symlink(source, target)?;
         }
@@ -953,6 +1112,20 @@ impl Downloader {
             if file_path.exists() {
                 fs::remove_file(file_path).await.map_err(io_error)?;
             }
+        }
+
+        if let Some(paths) = &self.path_lists {
+            let data = serde_json::to_string(paths).map_err(serde_error)?;
+            let root = self.get_file_root(false, true);
+            let path = root.join(".warp-fileList.json");
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .create(true)
+                .open(path)
+                .await
+                .map_err(io_error)?;
+            file.write_all(data.as_bytes()).await.map_err(io_error)?;
         }
 
         Ok(())
