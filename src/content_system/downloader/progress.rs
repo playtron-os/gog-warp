@@ -20,8 +20,8 @@ pub struct DownloadProgress {
     pub written: u64,
     pub total_download: u64,
     pub total_size: u64,
-    pub avg_network: f32,
-    pub avg_disk: f32,
+    //pub avg_network: f32,
+    //pub avg_disk: f32,
 }
 
 pub enum WorkerUpdate {

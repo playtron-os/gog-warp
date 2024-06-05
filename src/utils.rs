@@ -99,7 +99,7 @@ mod tests {
             fallback_only: false,
         };
 
-        let result = assemble_url(sample, "f1/d4/f1d41c76eb9639d2f8c1d3fd2057d7f1");
+        let result = assemble_url(&sample, "f1/d4/f1d41c76eb9639d2f8c1d3fd2057d7f1");
         assert_eq!(result, "https://gog-cdn-fastly.gog.com/token=nva=1717011195~dirs=4~token=0f76ef3e8f6b5d6baddc4/content-system/v2/store/2034949552/f1/d4/f1d41c76eb9639d2f8c1d3fd2057d7f1")
     }
 }

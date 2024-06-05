@@ -467,9 +467,13 @@ impl Downloader {
             progress::DownloadFileStatus::Allocated
         } else {
             let diff_file = format!("{}.diff", path.to_str().unwrap());
+            let download_diff_file = format!("{}.diff.download", path.to_str().unwrap());
             let diff_file = PathBuf::from(diff_file);
+            let download_diff_file = PathBuf::from(download_diff_file);
             if diff_file.exists() {
                 return progress::DownloadFileStatus::PatchDownloaded;
+            } else if download_diff_file.exists() {
+                return progress::DownloadFileStatus::Allocated;
             }
             progress::DownloadFileStatus::NotInitialized
         }

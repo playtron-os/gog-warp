@@ -3,6 +3,7 @@ use gog_warp::{Downloader, Platform};
 use indicatif::ProgressStyle;
 use std::env;
 use std::fs::read;
+use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let home = env::var("HOME").unwrap();
 
     let mut downloader = Downloader::builder()
-        .core(core)
+        .core(core.clone())
         .language("en-US".to_string())
         .install_root(format!("{}/Games/warptest", home).into())
         // Support directory often contains installer files or default config files
@@ -51,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     downloader.prepare().await?;
     println!("Download prepared");
 
-    // Check for pre-existing files and return how many additional space is required
+    // Check for pre-existing files and return how much additional space is required
     // Here you should check if you have enough free disk space
     let required_space = downloader.get_requied_space().await?;
     println!(
@@ -67,6 +68,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .template("[{elapsed_precise}] {bar:50.cyan/blue} {binary_bytes}/{binary_total_bytes}")
             .unwrap(),
     );
+
+    progress.enable_steady_tick(std::time::Duration::from_secs(1));
 
     let token = downloader.get_cancellation();
     let task = tokio::spawn(async move { downloader.download().await });
@@ -88,6 +91,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(err) = task.await? {
         println!("Error in downloader: {}", err);
     }
+
+    let data = core.serialize_tokens().unwrap();
+    let mut file = tokio::fs::File::create(".gog.token").await?;
+    file.write_all(data.as_bytes()).await?;
 
     Ok(())
 }

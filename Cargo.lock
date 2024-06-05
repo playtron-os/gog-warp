@@ -404,7 +404,6 @@ dependencies = [
  "derive-getters",
  "futures",
  "indicatif",
- "lazy_static",
  "libc",
  "log",
  "parking_lot",
