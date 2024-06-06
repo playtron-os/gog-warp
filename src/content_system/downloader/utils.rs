@@ -31,33 +31,23 @@ pub async fn allocate(file: File, size: i64) -> Result<(), Error> {
 
 #[cfg(unix)]
 pub fn symlink(path: &str, target: &str) -> Result<(), Error> {
-    use libc::{open, symlinkat, O_DIRECTORY};
+    use libc::symlink;
     use std::{ffi::CString, path::PathBuf, str::FromStr};
 
     let link_path = PathBuf::from_str(path).unwrap();
-    let parent = link_path.parent().unwrap();
-
-    let install_root_path = CString::new(parent.to_str().unwrap()).map_err(io_error)?;
     let c_path = CString::new(path).map_err(io_error)?;
+    let c_target = CString::new(target).map_err(io_error)?;
+
     if link_path.exists() {
         std::fs::remove_file(link_path).map_err(io_error)?;
     }
-    let c_target = CString::new(target).map_err(io_error)?;
-    let directory_fd = unsafe { open(install_root_path.as_ptr(), O_DIRECTORY) };
 
-    if directory_fd == -1 {
-        let error = unsafe { *libc::__errno_location() };
-        return Err(io_error(format!("io error: {}", error)));
-    }
-
-    let ret = unsafe { symlinkat(c_target.as_ptr(), directory_fd, c_path.as_ptr()) };
+    let ret = unsafe { symlink(c_target.as_ptr(), c_path.as_ptr()) };
 
     if ret == -1 {
         let error = unsafe { *libc::__errno_location() };
         return Err(io_error(format!("io error: {}", error)));
     }
-
-    unsafe { libc::close(directory_fd) };
 
     Ok(())
 }

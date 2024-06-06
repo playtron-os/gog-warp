@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Check for pre-existing files and return how much additional space is required
     // Here you should check if you have enough free disk space
-    let required_space = downloader.get_requied_space().await?;
+    let required_space = downloader.get_required_space().await?;
     println!(
         "This operation requires {} additional disk space",
         required_space

@@ -196,13 +196,13 @@ impl Manifest {
     /// The actual download size may slightly differ depending on the implementation
     ///
     /// This size doesn't account for game dependencies [`crate::content_system::dependencies`]
-    pub fn install_size<I, V>(&self, language: &String, dlcs: I) -> (i64, i64)
+    pub fn install_size<I, V>(&self, language: &String, dlcs: I) -> (u64, u64)
     where
         I: IntoIterator<Item = V> + Copy,
         V: AsRef<str>,
     {
-        let mut download_size: i64 = 0;
-        let mut install_size: i64 = 0;
+        let mut download_size: u64 = 0;
+        let mut install_size: u64 = 0;
 
         match self {
             Self::V1(mv1) => {
@@ -224,8 +224,8 @@ impl Manifest {
                             continue;
                         }
                         if languages.contains(&"*".to_string()) || languages.contains(language) {
-                            download_size += size.parse::<i64>().unwrap();
-                            install_size += size.parse::<i64>().unwrap();
+                            download_size += size.parse::<u64>().unwrap();
+                            install_size += size.parse::<u64>().unwrap();
                         }
                     }
                 }
@@ -245,8 +245,8 @@ impl Manifest {
                     if depot.languages().contains(&"*".to_string())
                         || depot.languages().contains(language)
                     {
-                        download_size += depot.compressed_size();
-                        install_size += depot.size();
+                        download_size += *depot.compressed_size() as u64;
+                        install_size += *depot.size() as u64;
                     }
                 }
             }

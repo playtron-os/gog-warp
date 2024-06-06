@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     downloader.prepare().await?;
-    let required_space = downloader.get_requied_space().await?;
+    let required_space = downloader.get_required_space().await?;
     println!("required space {}", required_space);
     downloader.download().await?;
 

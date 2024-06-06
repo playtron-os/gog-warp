@@ -394,7 +394,7 @@ impl Downloader {
 
     /// Return space required for operation to complete, takes in account pre-allocated files
     /// You should check if you have enough space before calling `download`
-    pub async fn get_requied_space(&mut self) -> Result<i64, Error> {
+    pub async fn get_required_space(&mut self) -> Result<i64, Error> {
         let report = self.download_report.take().unwrap();
         let mut size_total: i64 = 0;
         // Since we want to allow the game to be playable after pausing the update
