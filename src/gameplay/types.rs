@@ -7,7 +7,7 @@ pub struct GameInfo {
     pub client_id: Option<String>,
     pub game_id: String,
     pub language: String,
-    #[serde(deserialize_with = "languages::serde_language")]
+    #[serde(deserialize_with = "languages::serde_language", default)]
     pub languages: Vec<String>,
     pub name: String,
     pub play_tasks: Vec<Task>,
@@ -23,9 +23,11 @@ pub enum Task {
     Url(UrlTask),
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskCategory {
+    #[default]
+    Unset,
     Launcher,
     Game,
     Document,
@@ -34,10 +36,11 @@ pub enum TaskCategory {
 
 #[derive(Deserialize, Debug)]
 pub struct UrlTask {
+    #[serde(default)]
     pub category: TaskCategory,
-    #[serde(deserialize_with = "languages::serde_language")]
+    #[serde(deserialize_with = "languages::serde_language", default)]
     pub languages: Vec<String>,
-    pub name: String,
+    pub name: Option<String>,
 
     pub link: String,
 }
@@ -45,10 +48,11 @@ pub struct UrlTask {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTask {
+    #[serde(default)]
     pub category: TaskCategory,
-    #[serde(deserialize_with = "languages::serde_language")]
+    #[serde(deserialize_with = "languages::serde_language", default)]
     pub languages: Vec<String>,
-    pub name: String,
+    pub name: Option<String>,
 
     #[serde(default)]
     pub is_primary: bool,
