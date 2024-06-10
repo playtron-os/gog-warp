@@ -327,15 +327,23 @@ impl Downloader {
         if let Some(dm) = &self.dependency_manifest {
             let reqwest_client = self.core.reqwest_client();
             if let Some(manifest) = &self.manifest {
+                let mut dependencies = manifest.dependencies();
+                if manifest.needs_isi() {
+                    dependencies.push("ISI".to_string());
+                }
                 let new_deps = dm
-                    .get_depots(reqwest_client.clone(), &manifest.dependencies(), false)
+                    .get_depots(reqwest_client.clone(), &dependencies, false)
                     .await?;
                 depots.extend(new_deps);
             }
 
             if let Some(om) = &self.old_manifest {
+                let mut dependencies = om.dependencies();
+                if om.needs_isi() {
+                    dependencies.push("ISI".to_string());
+                }
                 let old_deps = dm
-                    .get_depots(reqwest_client.clone(), &om.dependencies(), false)
+                    .get_depots(reqwest_client.clone(), &dependencies, false)
                     .await?;
                 old_depots.extend(old_deps);
             }
@@ -752,8 +760,8 @@ impl Downloader {
 
         let download_progress = Arc::new(Mutex::new(download_progress));
 
-        let file_semaphore = Arc::new(Semaphore::new(4));
-        let chunk_semaphore = Arc::new(Semaphore::new(8));
+        let file_semaphore = Arc::new(Semaphore::new(3));
+        let chunk_semaphore = Arc::new(Semaphore::new(6));
 
         // TODO: Handle download speed reports
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorkerUpdate>();

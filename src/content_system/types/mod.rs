@@ -12,6 +12,8 @@ use crate::{
     errors::{request_error, serde_error, zlib_error},
 };
 
+use super::dependencies::DependenciesManifest;
+
 pub(crate) mod traits;
 pub mod v1;
 pub mod v2;
@@ -118,6 +120,14 @@ impl Manifest {
         }
     }
 
+    /// Whether the script interpreter is required
+    pub fn needs_isi(&self) -> bool {
+        if let Self::V2(mv2) = self {
+            return *mv2.script_interpreter();
+        }
+        false
+    }
+
     /// Lists available DLC ids for this build
     pub fn dlcs(&self) -> Vec<String> {
         match self {
@@ -192,11 +202,14 @@ impl Manifest {
 
     /// Returns a tuple of (compressed_size, decompressed_size)
     /// based on wanted language and dlcs
-    /// This consists of game files alone
     /// The actual download size may slightly differ depending on the implementation
-    ///
-    /// This size doesn't account for game dependencies [`crate::content_system::dependencies`]
-    pub fn install_size<I, V>(&self, language: &String, dlcs: I) -> (u64, u64)
+    /// Includes dependencies sizes if dependencies_manifest is provided
+    pub fn install_size<I, V>(
+        &self,
+        language: &String,
+        dlcs: I,
+        dependenies_manifest: Option<&DependenciesManifest>,
+    ) -> (u64, u64)
     where
         I: IntoIterator<Item = V> + Copy,
         V: AsRef<str>,
@@ -247,6 +260,19 @@ impl Manifest {
                     {
                         download_size += *depot.compressed_size() as u64;
                         install_size += *depot.size() as u64;
+                    }
+                }
+            }
+        }
+
+        if let Some(manifest) = dependenies_manifest {
+            let deps = self.dependencies();
+            for dep in deps {
+                for depot in &manifest.depots {
+                    if depot.dependency_id == dep {
+                        download_size += depot.compressed_size;
+                        install_size += depot.size;
+                        break;
                     }
                 }
             }

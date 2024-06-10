@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter};
 pub(crate) type EmptyResult = Result<(), Error>;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ErrorKind {
     NotLoggedIn,
     Unauthorized,
@@ -34,6 +34,10 @@ impl Error {
             kind,
             source: err.map(Into::into),
         }
+    }
+
+    pub fn kind(&self) -> ErrorKind {
+        self.kind.clone()
     }
 }
 

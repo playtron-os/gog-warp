@@ -14,7 +14,7 @@ def main():
         name = lang["name"]
         native_name = lang["nativeName"]
         deprecated_codes = [f"\"{n}\"" for n in lang["deprecatedCodes"]]
-        print("Language {" + 'name: "{}", code: "{}", native_name: "{}", deprecated_codes: vec![{}]'.format(
+        print("Language {" + 'name: "{}", code: "{}", native_name: "{}", deprecated_codes: &[{}]'.format(
             name, code, native_name, ",".join(deprecated_codes)) + "},")
 
 
