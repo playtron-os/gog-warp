@@ -90,7 +90,7 @@ pub fn diff(
                 Some(DepotEntry::V1(v1::DepotEntry::File(of))),
             ) => {
                 if nf.hash() == of.hash() {
-                    final_download.remove(&nf.path().to_lowercase());
+                    final_download.remove(new_path);
                 }
             }
             (
@@ -107,7 +107,7 @@ pub fn diff(
                     .unwrap_or_else(|| nf.chunks().first().unwrap().md5().to_owned());
 
                 if new_checksum == *of.hash() {
-                    final_download.remove(&nf.path().to_lowercase());
+                    final_download.remove(new_path);
                 }
             }
             (
@@ -123,7 +123,7 @@ pub fn diff(
                     .unwrap_or_else(|| of.chunks().first().unwrap().md5().to_owned());
 
                 if old_checksum == *nf.hash() {
-                    final_download.remove(&nf.path().to_lowercase());
+                    final_download.remove(new_path);
                 }
             }
             (

@@ -103,7 +103,10 @@ pub async fn get_patches(
         let mut zlib = ZlibDecoder::new(&data[..]);
         let mut buffer = Vec::new();
         zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
-        serde_json::from_slice(&buffer).map_err(serde_error)?
+        match serde_json::from_slice(&buffer) {
+            Ok(d) => d,
+            Err(_) => return Ok(None), // Most likely an empty patch
+        }
     };
 
     // Assert that the algorithm is the one we support
