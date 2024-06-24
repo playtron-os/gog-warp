@@ -524,46 +524,46 @@ impl Downloader {
 
         let install_root = self.get_file_root(false, "0", false);
         if !install_root.exists() {
-            fs::create_dir_all(install_root).await.map_err(io_error)?;
+            fs::create_dir_all(&install_root).await.map_err(io_error)?;
         }
 
         log::info!("Checking for interrupted downloads");
-        // Make sure we are updating to the same manifest
-        if self.old_manifest.is_some() {
-            if let Some(build_id) = &self.build_id {
-                let build_state_path = self.tmp_path.join(".warp-build");
-                // Check if file indicating the build we upgrade to, exists
-                if build_state_path.exists() {
-                    // If it does, compare builds
-                    // and remove the tmp directory if they dont match to
-                    // reset the download
-                    let mut file = fs::OpenOptions::new()
-                        .read(true)
-                        .open(&build_state_path)
-                        .await
-                        .map_err(io_error)?;
-                    let mut buffer = String::new();
-                    file.read_to_string(&mut buffer).await.map_err(io_error)?;
-                    let current_build = buffer.trim();
-                    if current_build != build_id {
-                        fs::remove_dir_all(&self.tmp_path).await.map_err(io_error)?;
-                        fs::create_dir_all(&self.tmp_path).await.map_err(io_error)?;
-                    }
-                }
-
+        if let Some(build_id) = &self.build_id {
+            let build_state_path = install_root.join(".gog-warp-build");
+            // Check if file indicating the build we previously installed exists
+            // For updates this will only affect !Temp subdirectory
+            if build_state_path.exists() {
+                // If it does, compare builds
+                // and reset the download if they dont match to
+                // reset the download
                 let mut file = fs::OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(build_state_path)
+                    .read(true)
+                    .open(&build_state_path)
                     .await
                     .map_err(io_error)?;
-
-                file.write_all(build_id.as_bytes())
-                    .await
-                    .map_err(io_error)?;
-                file.flush().await.map_err(io_error)?;
+                let mut buffer = String::new();
+                file.read_to_string(&mut buffer).await.map_err(io_error)?;
+                let current_build = buffer.trim();
+                if current_build != build_id {
+                    log::warn!("Found different download in progress, resetting the state");
+                    // TODO: Force a verify instead
+                    fs::remove_dir_all(&install_root).await.map_err(io_error)?;
+                    fs::create_dir_all(&install_root).await.map_err(io_error)?;
+                }
             }
+
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(build_state_path)
+                .await
+                .map_err(io_error)?;
+
+            file.write_all(build_id.as_bytes())
+                .await
+                .map_err(io_error)?;
+            file.flush().await.map_err(io_error)?;
         }
 
         let report = self.download_report.clone().unwrap();
@@ -1207,6 +1207,12 @@ impl Downloader {
                 .await
                 .map_err(io_error)?;
             file.write_all(data.as_bytes()).await.map_err(io_error)?;
+        }
+        let build_id_file = self
+            .get_file_root(false, "0", false)
+            .join(".gog-warp-build");
+        if build_id_file.exists() {
+            fs::remove_file(build_id_file).await.map_err(io_error)?;
         }
 
         Ok(())
