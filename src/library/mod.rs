@@ -4,7 +4,6 @@ use crate::auth::types::Token;
 use crate::constants::domains::*;
 use crate::errors::request_error;
 use crate::library::types::{GalaxyLibraryItem, OwnedProductsResponse};
-use reqwest::header::{HeaderValue, AUTHORIZATION};
 use reqwest::{Client, Url};
 
 pub(crate) async fn get_owned_licenses(
@@ -13,12 +12,9 @@ pub(crate) async fn get_owned_licenses(
 ) -> Result<Vec<u64>, crate::Error> {
     log::debug!("Getting owned licenses");
     let url = format!("{}/user/data/games", GOG_EMBED);
-    let mut auth_header =
-        HeaderValue::from_str(&format!("Bearer {}", token.access_token())).unwrap();
-    auth_header.set_sensitive(true);
     let response = client
         .get(url)
-        .header(AUTHORIZATION, auth_header)
+        .bearer_auth(token.access_token())
         .send()
         .await
         .map_err(request_error)?;
@@ -38,13 +34,10 @@ async fn get_galaxy_library_page(
         url.query_pairs_mut()
             .append_pair("page_token", next_page_token);
     }
-    let mut auth_header =
-        HeaderValue::from_str(&format!("Bearer {}", token.access_token())).unwrap();
-    auth_header.set_sensitive(true);
 
     let response = client
         .get(url)
-        .header(AUTHORIZATION, auth_header)
+        .bearer_auth(token.access_token())
         .send()
         .await
         .map_err(request_error)?;

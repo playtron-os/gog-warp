@@ -64,6 +64,10 @@ pub async fn get_patches(
         return Ok(None);
     }
 
+    if build_id == &old_build_id {
+        return Ok(None);
+    }
+
     let build_id = build_id.clone().unwrap();
 
     let product_id = if let Some(manifest) = manifest {

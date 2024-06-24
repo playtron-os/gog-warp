@@ -282,7 +282,7 @@ impl Downloader {
         Builder::new()
     }
 
-    // Stops the download
+    /// Returns a cancellation token that allows to stop the download
     pub fn get_cancellation(&self) -> CancellationToken {
         self.cancellation_token.clone()
     }
@@ -307,6 +307,7 @@ impl Downloader {
         // Get depots for main manifest
         let mut depots = match &self.manifest {
             Some(m) => {
+                log::trace!("Getting depots for main manifest");
                 m.get_depots(self.core.reqwest_client(), &self.language, &self.dlcs)
                     .await?
             }
@@ -315,6 +316,7 @@ impl Downloader {
 
         let mut old_depots = match &self.old_manifest {
             Some(om) => {
+                log::trace!("Getting depots for old manifest");
                 om.get_depots(
                     self.core.reqwest_client(),
                     &self.old_language,
@@ -328,6 +330,7 @@ impl Downloader {
         if let Some(dm) = &self.dependency_manifest {
             let reqwest_client = self.core.reqwest_client();
             if let Some(manifest) = &self.manifest {
+                log::trace!("Collecting dependencies depots");
                 let mut dependencies = manifest.dependencies();
                 if manifest.needs_isi() {
                     dependencies.push("ISI".to_string());
@@ -350,6 +353,7 @@ impl Downloader {
             }
 
             if !self.global_dependencies.is_empty() {
+                log::trace!("Collecting global dependencies depots");
                 let global_deps = dm
                     .get_depots(reqwest_client.clone(), &self.global_dependencies, true)
                     .await?;
@@ -518,6 +522,50 @@ impl Downloader {
             None
         };
 
+        let install_root = self.get_file_root(false, "0", false);
+        if !install_root.exists() {
+            fs::create_dir_all(install_root).await.map_err(io_error)?;
+        }
+
+        log::info!("Checking for interrupted downloads");
+        // Make sure we are updating to the same manifest
+        if self.old_manifest.is_some() {
+            if let Some(build_id) = &self.build_id {
+                let build_state_path = self.tmp_path.join(".warp-build");
+                // Check if file indicating the build we upgrade to, exists
+                if build_state_path.exists() {
+                    // If it does, compare builds
+                    // and remove the tmp directory if they dont match to
+                    // reset the download
+                    let mut file = fs::OpenOptions::new()
+                        .read(true)
+                        .open(&build_state_path)
+                        .await
+                        .map_err(io_error)?;
+                    let mut buffer = String::new();
+                    file.read_to_string(&mut buffer).await.map_err(io_error)?;
+                    let current_build = buffer.trim();
+                    if current_build != build_id {
+                        fs::remove_dir_all(&self.tmp_path).await.map_err(io_error)?;
+                        fs::create_dir_all(&self.tmp_path).await.map_err(io_error)?;
+                    }
+                }
+
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(build_state_path)
+                    .await
+                    .map_err(io_error)?;
+
+                file.write_all(build_id.as_bytes())
+                    .await
+                    .map_err(io_error)?;
+                file.flush().await.map_err(io_error)?;
+            }
+        }
+
         let report = self.download_report.clone().unwrap();
         let mut new_symlinks: Vec<(String, String)> = Vec::new();
         let mut ready_files: HashSet<String> = HashSet::new();
@@ -525,15 +573,11 @@ impl Downloader {
         let secure_links: Arc<Mutex<HashMap<String, Vec<Endpoint>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        let install_root = self.get_file_root(false, "0", false);
-        if !install_root.exists() {
-            fs::create_dir_all(install_root).await.map_err(io_error)?;
-        }
-
         let mut download_progress: progress::DownloadProgress = Default::default();
 
         let mut allocated_files: u32 = 0;
 
+        log::info!("Allocating disk space");
         // Allocate disk space, generate secure links and restore progress state
         for file_list in &report.download {
             if let Some(sfc) = &file_list.sfc {
@@ -677,6 +721,11 @@ impl Downloader {
             if let std::collections::hash_map::Entry::Vacant(e) =
                 secure_links.entry(product_id.clone())
             {
+                log::debug!(
+                    "Getting the secure link for {} is_dep: {}",
+                    product_id,
+                    file_list.is_dependency
+                );
                 let endpoints = if file_list.is_dependency {
                     secure_link::get_dependencies_link(self.core.reqwest_client()).await?
                 } else {
@@ -695,6 +744,7 @@ impl Downloader {
             }
         }
 
+        log::info!("Processing patches");
         for patch in &report.patches {
             let entry = &patch.diff;
             let entry_path = entry.path();
@@ -709,10 +759,11 @@ impl Downloader {
             let mut secure_links = secure_links.lock().await;
             if !secure_links.contains_key(&product_id) {
                 let token = self.core.obtain_galaxy_token().await?;
+                log::info!("Getting patch secure_link for {}", patch.product_id);
                 let endpoints = secure_link::get_secure_link(
                     self.core.reqwest_client(),
                     manifest_version,
-                    &product_id,
+                    &patch.product_id,
                     &token,
                     "/",
                     "/patches/store",
@@ -1129,6 +1180,7 @@ impl Downloader {
         }
 
         for (source, target) in &new_symlinks {
+            log::debug!("Creating symlink {} -> {}", source, target);
             utils::symlink(source, target)?;
         }
 
@@ -1137,11 +1189,13 @@ impl Downloader {
             let root = self.get_file_root(file.is_support(), "0", true);
             let file_path = root.join(file_path);
             if file_path.exists() {
+                log::debug!("Removing {:?}", file_path);
                 fs::remove_file(file_path).await.map_err(io_error)?;
             }
         }
 
         if let Some(paths) = &self.path_lists {
+            log::debug!("Writing final file list");
             let data = serde_json::to_string(paths).map_err(serde_error)?;
             let root = self.get_file_root(false, "0", true);
             let path = root.join(".warp-fileList.json");

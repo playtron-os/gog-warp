@@ -1,4 +1,4 @@
-use reqwest::{header::HeaderValue, Client};
+use reqwest::Client;
 use serde::Deserialize;
 use url::Url;
 
@@ -40,12 +40,9 @@ pub async fn get_secure_link(
     }
 
     let url = Url::parse_with_params(&url, params).unwrap();
-    let mut auth_header =
-        HeaderValue::from_str(&format!("Bearer {}", token.access_token())).unwrap();
-    auth_header.set_sensitive(true);
     let response = reqwest_client
         .get(url)
-        .header("Authorization", auth_header)
+        .bearer_auth(token.access_token())
         .send()
         .await
         .map_err(request_error)?;
@@ -58,13 +55,12 @@ pub async fn get_secure_link(
 
     Ok(data
         .urls
-        .iter()
+        .into_iter()
         .filter(|u| {
             u.supports_generation()
                 .iter()
                 .any(|g| *g == (version as u32))
         })
-        .cloned()
         .collect())
 }
 
@@ -83,8 +79,7 @@ pub async fn get_dependencies_link(reqwest_client: &Client) -> Result<Vec<Endpoi
 
     Ok(data
         .urls
-        .iter()
+        .into_iter()
         .filter(|u| u.supports_generation().iter().any(|g| *g == 2))
-        .cloned()
         .collect())
 }

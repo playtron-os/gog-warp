@@ -1,4 +1,3 @@
-use reqwest::header::{HeaderValue, AUTHORIZATION};
 use reqwest::{Client, Url};
 
 use crate::auth::types::Token;
@@ -37,10 +36,7 @@ pub(crate) async fn get_builds(
     let url = Url::parse_with_params(&url, params).unwrap();
     let mut request = client.get(url);
     if let Some(token) = token {
-        let mut header =
-            HeaderValue::from_str(&format!("Bearer {}", token.access_token())).unwrap();
-        header.set_sensitive(true);
-        request = request.header(AUTHORIZATION, header);
+        request = request.bearer_auth(token.access_token());
     }
 
     let response = request.send().await.map_err(request_error)?;

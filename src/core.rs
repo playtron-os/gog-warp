@@ -92,7 +92,7 @@ impl Core {
 
                     self.tokens
                         .lock()
-                        .insert(GALAXY_CLIENT_ID.to_string(), new_token.clone());
+                        .insert(client_id.to_string(), new_token.clone());
                     return Ok(new_token);
                 }
 
@@ -108,7 +108,7 @@ impl Core {
 
                 self.tokens
                     .lock()
-                    .insert(GALAXY_CLIENT_ID.to_string(), new_token.clone());
+                    .insert(client_id.to_string(), new_token.clone());
                 Ok(new_token)
             }
         }
