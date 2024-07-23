@@ -1,6 +1,6 @@
 use crate::auth::types::Token;
 use crate::constants::GALAXY_CLIENT_ID;
-use crate::errors::{request_error, unauthorized_error};
+use crate::errors::{invalid_session_error, request_error, unauthorized_error};
 use crate::Error;
 use reqwest::{Client, Url};
 
@@ -38,6 +38,9 @@ pub(crate) async fn get_token_for(
     let response = client.get(url).send().await.map_err(request_error)?;
     if response.status().as_u16() == 401 {
         return Err(unauthorized_error());
+    }
+    if response.status().as_u16() == 400 {
+        return Err(invalid_session_error());
     }
     let response = response.error_for_status().map_err(request_error)?;
     let new_token = response.json().await.map_err(request_error)?;

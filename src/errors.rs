@@ -7,6 +7,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub enum ErrorKind {
     NotLoggedIn,
     Unauthorized,
+    InvalidSession,
     Cancelled,
     Serde,
     Request,
@@ -47,6 +48,9 @@ impl Display for Error {
             ErrorKind::Serde => f.write_str("serialization error"),
             ErrorKind::NotLoggedIn => f.write_str("not logged-in error"),
             ErrorKind::Unauthorized => f.write_str("token is no longer valid"),
+            ErrorKind::InvalidSession => {
+                f.write_str("current refresh token is no longer valid, re-login is required")
+            }
             ErrorKind::Request => f.write_str("network request error"),
             ErrorKind::Io => f.write_str("io error"),
             ErrorKind::MaximumRetries => f.write_str("maximum retries exceeded"),
@@ -84,6 +88,10 @@ pub(crate) fn not_logged_in_error() -> Error {
 
 pub(crate) fn unauthorized_error() -> Error {
     Error::new(ErrorKind::Unauthorized, None::<BoxError>)
+}
+
+pub(crate) fn invalid_session_error() -> Error {
+    Error::new(ErrorKind::InvalidSession, None::<BoxError>)
 }
 
 pub(crate) fn cancelled_error() -> Error {
