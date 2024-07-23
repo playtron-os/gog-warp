@@ -39,6 +39,7 @@ pub(crate) async fn get_token_for(
     if response.status().as_u16() == 401 {
         return Err(unauthorized_error());
     }
+    let response = response.error_for_status().map_err(request_error)?;
     let new_token = response.json().await.map_err(request_error)?;
     Ok(new_token)
 }

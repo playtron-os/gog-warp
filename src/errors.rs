@@ -22,7 +22,7 @@ pub enum ErrorKind {
 
 pub struct Error {
     kind: ErrorKind,
-    source: Option<BoxError>,
+    pub source: Option<BoxError>,
 }
 
 impl Error {
