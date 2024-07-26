@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         required_space
     );
     // If you want to listen for progress details, use this async channel
-    let mut reciever = downloader.take_progress_reciever().unwrap();
+    let mut reciever = downloader.take_progress_receiver().unwrap();
 
     let progress = indicatif::ProgressBar::new(0);
     progress.set_style(

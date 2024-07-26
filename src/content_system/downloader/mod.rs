@@ -290,7 +290,7 @@ impl Downloader {
     /// Returns a receiver for progress events
     /// leaving None in it's place, meaning this
     /// function will return Some only once
-    pub fn take_progress_reciever(&mut self) -> Option<Receiver<DownloadState>> {
+    pub fn take_progress_receiver(&mut self) -> Option<Receiver<DownloadState>> {
         self.progress_channel_receiver.take()
     }
 
