@@ -5,6 +5,7 @@ use url::Url;
 use crate::auth::types::Token;
 use crate::constants::domains::GOG_CONTENT_SYSTEM;
 use crate::errors::{request_error, unauthorized_error};
+use crate::utils::reqwest_exponential_backoff;
 
 use super::types::Endpoint;
 
@@ -40,12 +41,10 @@ pub async fn get_secure_link(
     }
 
     let url = Url::parse_with_params(&url, params).unwrap();
-    let response = reqwest_client
-        .get(url)
-        .bearer_auth(token.access_token())
-        .send()
-        .await
-        .map_err(request_error)?;
+    let response =
+        reqwest_exponential_backoff(reqwest_client.get(url).bearer_auth(token.access_token()))
+            .await
+            .map_err(request_error)?;
 
     if response.status().as_u16() == 401 {
         return Err(unauthorized_error());
@@ -69,9 +68,7 @@ pub async fn get_dependencies_link(reqwest_client: &Client) -> Result<Vec<Endpoi
         "{}/open_link?generation=2&_version=2&path=/dependencies/store/",
         GOG_CONTENT_SYSTEM
     );
-    let response = reqwest_client
-        .get(url)
-        .send()
+    let response = reqwest_exponential_backoff(reqwest_client.get(url))
         .await
         .map_err(request_error)?;
 
