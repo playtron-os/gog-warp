@@ -10,6 +10,7 @@ use tokio::io::AsyncReadExt;
 use crate::{
     constants::domains::GOG_CDN,
     errors::{request_error, serde_error, zlib_error},
+    utils::reqwest_exponential_backoff,
 };
 
 use super::dependencies::DependenciesManifest;
@@ -323,9 +324,7 @@ impl Manifest {
                             mv1.product().timestamp(),
                             manifest
                         );
-                        let response = reqwest_client
-                            .get(url)
-                            .send()
+                        let response = reqwest_exponential_backoff(reqwest_client.get(url))
                             .await
                             .map_err(request_error)?;
 
@@ -363,9 +362,7 @@ impl Manifest {
 
                     let galaxy_path = crate::utils::hash_to_galaxy_path(depot.manifest());
                     let url = format!("{}/content-system/v2/meta/{}", GOG_CDN, galaxy_path);
-                    let response = reqwest_client
-                        .get(url)
-                        .send()
+                    let response = reqwest_exponential_backoff(reqwest_client.get(url))
                         .await
                         .map_err(request_error)?;
                     let compressed_manifest = response.bytes().await.map_err(request_error)?;

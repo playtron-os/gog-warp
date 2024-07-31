@@ -534,8 +534,7 @@ impl Downloader {
             // For updates this will only affect !Temp subdirectory
             if build_state_path.exists() {
                 // If it does, compare builds
-                // and reset the download if they dont match to
-                // reset the download
+                // and reset the download if they dont match
                 let mut file = fs::OpenOptions::new()
                     .read(true)
                     .open(&build_state_path)

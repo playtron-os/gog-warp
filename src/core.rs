@@ -6,6 +6,7 @@ use crate::content_system::types::{Build, BuildResponse, Manifest, Platform};
 use crate::errors::{maximum_retries_error, serde_error, zlib_error};
 use crate::library::types::GalaxyLibraryItem;
 use crate::user::types::UserData;
+use crate::utils::reqwest_exponential_backoff;
 use crate::{auth, content_system, errors, user};
 use chrono::Utc;
 use parking_lot::Mutex;
@@ -186,26 +187,24 @@ impl Core {
     /// Get manifest for the build obtained with [`Core::get_builds`]
     pub async fn get_manifest(&self, build: &Build) -> Result<Manifest, errors::Error> {
         for endpoint in build.urls() {
-            for _retry in 0..3 {
-                let response = self.reqwest_client.get(endpoint.url()).send().await;
-                if let Ok(res) = response {
-                    if res.status().as_u16() != 200 {
-                        break;
-                    }
-                    if let Ok(data) = res.bytes().await {
-                        if *build.generation() == 1 {
-                            let manifest: Manifest =
-                                serde_json::from_slice(&data).map_err(serde_error)?;
-                            return Ok(manifest);
-                        }
-                        let mut zlib =
-                            async_compression::tokio::bufread::ZlibDecoder::new(&data[..]);
-                        let mut buffer = Vec::new();
-                        zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
+            let response =
+                reqwest_exponential_backoff(self.reqwest_client.get(endpoint.url())).await;
+            if let Ok(res) = response {
+                if res.status().as_u16() != 200 {
+                    continue;
+                }
+                if let Ok(data) = res.bytes().await {
+                    if *build.generation() == 1 {
                         let manifest: Manifest =
-                            serde_json::from_slice(buffer.as_slice()).map_err(serde_error)?;
+                            serde_json::from_slice(&data).map_err(serde_error)?;
                         return Ok(manifest);
                     }
+                    let mut zlib = async_compression::tokio::bufread::ZlibDecoder::new(&data[..]);
+                    let mut buffer = Vec::new();
+                    zlib.read_to_end(&mut buffer).await.map_err(zlib_error)?;
+                    let manifest: Manifest =
+                        serde_json::from_slice(buffer.as_slice()).map_err(serde_error)?;
+                    return Ok(manifest);
                 }
             }
         }

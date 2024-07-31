@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use reqwest::RequestBuilder;
 use url::Url;
 
 use crate::content_system::types::Endpoint;
@@ -42,6 +45,35 @@ pub fn assemble_url(endpoint: &Endpoint, path: &str) -> String {
     }
 
     url
+}
+
+/// Exponential backoff wrapper for rust reqwest
+/// Doesn't support streaming body
+pub(crate) async fn reqwest_exponential_backoff(
+    request_builder: RequestBuilder,
+) -> reqwest::Result<reqwest::Response> {
+    let mut failed = 0;
+    let exp: f32 = 1.3;
+    let request = request_builder.try_clone();
+    if request.is_none() {
+        return request_builder.send().await;
+    }
+    let mut request = request.unwrap();
+
+    loop {
+        match request.send().await {
+            Ok(res) => return Ok(res),
+            Err(err) => {
+                if failed == 5 || !err.is_request() {
+                    return Err(err);
+                }
+            }
+        }
+
+        tokio::time::sleep(Duration::from_secs_f32(3. * exp.powi(failed))).await;
+        failed += 1;
+        request = request_builder.try_clone().unwrap();
+    }
 }
 
 #[cfg(test)]

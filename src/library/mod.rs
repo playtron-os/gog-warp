@@ -4,6 +4,7 @@ use crate::auth::types::Token;
 use crate::constants::domains::*;
 use crate::errors::request_error;
 use crate::library::types::{GalaxyLibraryItem, OwnedProductsResponse};
+use crate::utils::reqwest_exponential_backoff;
 use reqwest::{Client, Url};
 
 pub(crate) async fn get_owned_licenses(
@@ -12,10 +13,7 @@ pub(crate) async fn get_owned_licenses(
 ) -> Result<Vec<u64>, crate::Error> {
     log::debug!("Getting owned licenses");
     let url = format!("{}/user/data/games", GOG_EMBED);
-    let response = client
-        .get(url)
-        .bearer_auth(token.access_token())
-        .send()
+    let response = reqwest_exponential_backoff(client.get(url).bearer_auth(token.access_token()))
         .await
         .map_err(request_error)?;
     let list: OwnedProductsResponse = response.json().await.map_err(request_error)?;
@@ -35,10 +33,7 @@ async fn get_galaxy_library_page(
             .append_pair("page_token", next_page_token);
     }
 
-    let response = client
-        .get(url)
-        .bearer_auth(token.access_token())
-        .send()
+    let response = reqwest_exponential_backoff(client.get(url).bearer_auth(token.access_token()))
         .await
         .map_err(request_error)?;
     let response = response.error_for_status().map_err(request_error)?;

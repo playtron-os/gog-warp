@@ -3,6 +3,7 @@ use reqwest::{Client, Url};
 use crate::auth::types::Token;
 use crate::constants::domains::GOG_CONTENT_SYSTEM;
 use crate::errors::request_error;
+use crate::utils::reqwest_exponential_backoff;
 
 pub mod dependencies;
 #[cfg(feature = "downloader")]
@@ -39,7 +40,9 @@ pub(crate) async fn get_builds(
         request = request.bearer_auth(token.access_token());
     }
 
-    let response = request.send().await.map_err(request_error)?;
+    let response = reqwest_exponential_backoff(request)
+        .await
+        .map_err(request_error)?;
     let data = response.json().await.map_err(request_error)?;
 
     Ok(data)

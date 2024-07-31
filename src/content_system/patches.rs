@@ -7,6 +7,7 @@ use url::Url;
 
 use crate::constants::domains::{GOG_CDN, GOG_CONTENT_SYSTEM};
 use crate::errors::{request_error, serde_error, zlib_error};
+use crate::utils::reqwest_exponential_backoff;
 
 use super::types::v2::{DepotDetails, ManifestDepot};
 use super::types::{DepotEntry, FileList, Manifest};
@@ -86,9 +87,7 @@ pub async fn get_patches(
         ],
     )
     .unwrap();
-    let response = reqwest_client
-        .get(index_url)
-        .send()
+    let response = reqwest_exponential_backoff(reqwest_client.get(index_url))
         .await
         .map_err(request_error)?;
 
@@ -96,9 +95,7 @@ pub async fn get_patches(
         return Ok(None);
     }
     let index: PatchIndex = response.json().await.map_err(request_error)?;
-    let depots_res = reqwest_client
-        .get(index.link())
-        .send()
+    let depots_res = reqwest_exponential_backoff(reqwest_client.get(index.link()))
         .await
         .map_err(request_error)?;
 
@@ -115,6 +112,7 @@ pub async fn get_patches(
 
     // Assert that the algorithm is the one we support
     if depots.algorithm != "xdelta3" {
+        log::warn!("New patching algorithm {}", depots.algorithm);
         return Ok(None);
     }
 
@@ -137,9 +135,7 @@ pub async fn get_patches(
             GOG_CDN,
             crate::utils::hash_to_galaxy_path(depot.manifest())
         );
-        let response = reqwest_client
-            .get(url)
-            .send()
+        let response = reqwest_exponential_backoff(reqwest_client.get(url))
             .await
             .map_err(request_error)?;
         let details: DepotDetails = {

@@ -7,6 +7,7 @@ use super::languages;
 use super::types::{v2, DepotEntry, FileList};
 use crate::constants::domains::GOG_CDN;
 use crate::errors::{request_error, serde_error, zlib_error};
+use crate::utils::reqwest_exponential_backoff;
 
 pub const DEPENDENCIES_URL: &str =
     "https://content-system.gog.com/dependencies/repository?generation=2";
@@ -37,9 +38,7 @@ impl DependenciesManifest {
                     "{}/content-system/v2/dependencies/meta/{}",
                     GOG_CDN, galaxy_path
                 );
-                let response = reqwest_client
-                    .get(url)
-                    .send()
+                let response = reqwest_exponential_backoff(reqwest_client.get(url))
                     .await
                     .map_err(request_error)?;
                 let compressed_manifest = response.bytes().await.map_err(request_error)?;
@@ -91,16 +90,12 @@ struct Repository {
 }
 
 pub async fn get_manifest(reqwest_client: Client) -> Result<DependenciesManifest, crate::Error> {
-    let response = reqwest_client
-        .get(DEPENDENCIES_URL)
-        .send()
+    let response = reqwest_exponential_backoff(reqwest_client.get(DEPENDENCIES_URL))
         .await
         .map_err(request_error)?;
     let repo: Repository = response.json().await.map_err(request_error)?;
 
-    let response = reqwest_client
-        .get(repo.repository_manifest)
-        .send()
+    let response = reqwest_exponential_backoff(reqwest_client.get(repo.repository_manifest))
         .await
         .map_err(request_error)?;
 
