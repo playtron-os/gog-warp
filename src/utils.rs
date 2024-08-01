@@ -49,7 +49,7 @@ pub fn assemble_url(endpoint: &Endpoint, path: &str) -> String {
 
 /// Exponential backoff wrapper for rust reqwest
 /// Doesn't support streaming body
-pub(crate) async fn reqwest_exponential_backoff(
+pub async fn reqwest_exponential_backoff(
     request_builder: RequestBuilder,
 ) -> reqwest::Result<reqwest::Response> {
     let mut failed = 0;
