@@ -30,7 +30,7 @@ impl Default for Core {
 
 impl Core {
     pub fn new() -> Self {
-        let client = reqwest::Client::default();
+        let client = reqwest::Client::builder().no_gzip().build().unwrap();
         Self {
             tokens: Arc::new(Mutex::new(HashMap::new())),
             reqwest_client: client,
@@ -74,6 +74,7 @@ impl Core {
         client_secret: &str,
     ) -> Result<Token, errors::Error> {
         self.ensure_auth()?;
+        let galaxy_token = self.get_token(GALAXY_CLIENT_ID).unwrap();
         match self.get_token(client_id) {
             Some(token) => {
                 log::debug!(
@@ -88,7 +89,7 @@ impl Core {
                 if login_time + expires_in < current_time {
                     log::debug!("Refreshing token for client {}", client_id);
                     let new_token =
-                        get_token_for(&self.reqwest_client, client_id, client_secret, token)
+                        get_token_for(&self.reqwest_client, client_id, client_secret, galaxy_token)
                             .await?;
 
                     self.tokens
@@ -102,7 +103,6 @@ impl Core {
             None => {
                 log::debug!("Getting new token for client {}", client_id);
                 // Get new token
-                let galaxy_token = self.get_token(GALAXY_CLIENT_ID).unwrap();
                 let new_token =
                     get_token_for(&self.reqwest_client, client_id, client_secret, galaxy_token)
                         .await?;
