@@ -91,7 +91,7 @@ pub async fn get_patches(
         .await
         .map_err(request_error)?;
 
-    if response.status().as_u16() == 404 {
+    if !response.status().is_success() {
         return Ok(None);
     }
     let index: PatchIndex = response.json().await.map_err(request_error)?;
