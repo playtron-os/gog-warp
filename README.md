@@ -1,3 +1,27 @@
+# gog-warp
+
+A Rust library for interfacing with GOG API.
+
+## Current features
+
+Currently library is focused on supporting Windows builds available through GOG Galaxy API.
+Proper support for MacOS games can be easily added in the future.
+
+The library currently handles:
+
+- Authorization
+- Getting user details
+- Getting list of owned games 
+- Downloading and Updating games and DLC (requires downloader feature to be enabled)
+- Downloading game dependencies
+
+## Quick Start
+
+Take a look at [examples](examples/get_library.rs)
+
+Below is a example of initial authorization flow 
+
+```rust
 use std::fs::File;
 use std::io::{stdin, stdout, BufRead, Write};
 
@@ -36,3 +60,8 @@ async fn main() {
         .expect("Failed to write data");
     // Use core.deserialize_tokens() to load them in
 }
+
+```
+
+## License
+[Apache-2.0 license](LICENSE)
