@@ -29,13 +29,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .find(|b| *b.generation() == 1)
         .expect("No v1 builds");
     let manifest = core
-        .get_manifest(&build)
+        .get_manifest(build)
         .await
         .expect("Failed to get manifest");
     println!("Install directory: {}", manifest.install_directory());
     println!("Languages: {:?}", manifest.languages());
 
-    println!("");
+    println!();
 
     let cyberpunk_builds = core
         .get_builds("1423049311", Platform::Windows, None)
@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Build not found");
 
     let manifest = core
-        .get_manifest(&build)
+        .get_manifest(build)
         .await
         .expect("Failed to get manifest");
 

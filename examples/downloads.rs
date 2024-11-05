@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Picked latest build {}", latest.build_id());
 
     // Obtain the manifest, you should store it for later along with the build_id
-    let latest_manifest = core.get_manifest(&latest).await?;
+    let latest_manifest = core.get_manifest(latest).await?;
     println!("Got manifest");
 
     // Providing dependencies manifest enables gog-warp to obtain game scoped dependencies

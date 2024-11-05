@@ -26,12 +26,13 @@ pub enum Task {
 #[derive(Deserialize, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskCategory {
-    #[default]
-    Unset,
     Launcher,
     Game,
     Document,
     Tool,
+    #[default]
+    #[serde(other)]
+    Other
 }
 
 #[derive(Deserialize, Debug)]
