@@ -109,11 +109,12 @@ impl super::traits::EntryUtils for DepotEntry {
 
 #[derive(Serialize, Deserialize, Getters, Clone, Debug)]
 pub struct DepotFile {
-    offset: i64,
-    hash: String,
-    url: String,
     path: String,
     size: i64,
+    offset: Option<i64>,
+    url: Option<String>,
+    #[serde(default)]
+    hash: String,
     #[serde(default)]
     support: bool,
     #[serde(default)]

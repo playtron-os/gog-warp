@@ -32,7 +32,7 @@ pub enum TaskCategory {
     Tool,
     #[default]
     #[serde(other)]
-    Other
+    Other,
 }
 
 #[derive(Deserialize, Debug)]

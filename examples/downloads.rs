@@ -17,7 +17,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("failed to load tokens");
 
     let builds = core
-        .get_builds("1207659234", Platform::Windows, None)
+        .get_builds(
+            &env::args().nth(1).expect("Expected game id as parameter"),
+            Platform::Windows,
+            None,
+        )
         .await?;
     println!("Got builds");
 

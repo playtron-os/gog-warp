@@ -10,7 +10,9 @@ async fn main() {
         .expect("failed to load tokens");
 
     let info = gog_warp::gameplay::read_game_info(
-        std::env::args().nth(1).expect("Expected argument to game directory"),
+        std::env::args()
+            .nth(1)
+            .expect("Expected argument to game directory"),
         gog_warp::Platform::Windows,
     )
     .await

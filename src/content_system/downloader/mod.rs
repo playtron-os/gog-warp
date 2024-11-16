@@ -652,6 +652,7 @@ impl Downloader {
                                 .open(&file_path)
                                 .await
                                 .map_err(io_error)?;
+                            ready_files.insert(entry_path.clone());
                         }
 
                         DepotEntry::V2(v2::DepotEntry::Link(link)) => {

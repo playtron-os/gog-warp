@@ -46,7 +46,10 @@ pub async fn v1(
     let endpoint = endpoints.first().unwrap();
     let url = assemble_url(endpoint, "main.bin");
 
-    let offset = *file.offset();
+    let Some(offset) = *file.offset() else {
+        log::warn!("Offset was not set for v1 file, this shouldn't happen!");
+        return Ok(());
+    };
     let end = offset + *file.size() - 1;
 
     let mut file_handle = OpenOptions::new()

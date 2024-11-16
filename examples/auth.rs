@@ -24,7 +24,7 @@ async fn main() {
 
     // A small utility to check if appropriate token is in place
     assert!(core.ensure_auth().is_ok(), "Login wasn't successful");
-    // Cloned core shares the same state 
+    // Cloned core shares the same state
     assert!(core2.ensure_auth().is_ok(), "Login wasn't successful");
 
     println!("Login success");
