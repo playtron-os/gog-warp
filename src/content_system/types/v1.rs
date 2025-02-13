@@ -36,7 +36,9 @@ pub enum ManifestDepot {
     },
     Redist {
         redist: String,
-        size: String,
+        size: Option<String>,
+        #[serde(rename = "targetDir")]
+        target_dir: Option<String>,
     },
 }
 

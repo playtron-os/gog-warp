@@ -16,6 +16,7 @@ pub struct Manifest {
     products: Vec<ManifestProduct>,
     #[serde(default)]
     script_interpreter: bool,
+    #[serde(default)]
     tags: Vec<String>,
 }
 

@@ -34,4 +34,5 @@ downloader = []
 
 [dev-dependencies]
 indicatif = "0.17.8"
+simple_logger = "5.0.0"
 
