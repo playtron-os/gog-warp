@@ -14,12 +14,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 
+#[derive(Clone)]
+pub enum CoreEvent {
+    TokenRefreshed((String, String)),
+}
+
 /// Library entry point  
 /// It's job is to manage authentication and provide nice wrapper arround available endpoints
-#[derive(Clone)]
 pub struct Core {
     tokens: Arc<Mutex<HashMap<String, Token>>>,
     reqwest_client: reqwest::Client,
+    tx: tokio::sync::broadcast::Sender<CoreEvent>,
+    _rx: tokio::sync::broadcast::Receiver<CoreEvent>,
 }
 
 impl Default for Core {
@@ -28,13 +34,32 @@ impl Default for Core {
     }
 }
 
+impl Clone for Core {
+    fn clone(&self) -> Self {
+        Core {
+            tokens: self.tokens.clone(),
+            reqwest_client: self.reqwest_client.clone(),
+            tx: self.tx.clone(),
+            _rx: self.tx.subscribe(),
+        }
+    }
+}
+
 impl Core {
     pub fn new() -> Self {
         let client = reqwest::Client::builder().no_gzip().build().unwrap();
+        let (tx, rx) = tokio::sync::broadcast::channel::<CoreEvent>(128);
+
         Self {
             tokens: Arc::new(Mutex::new(HashMap::new())),
             reqwest_client: client,
+            tx,
+            _rx: rx,
         }
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<CoreEvent> {
+        self.tx.subscribe()
     }
 
     pub fn reqwest_client(&self) -> &reqwest::Client {
@@ -95,6 +120,12 @@ impl Core {
                     self.tokens
                         .lock()
                         .insert(client_id.to_string(), new_token.clone());
+
+                    _ = self.tx.send(CoreEvent::TokenRefreshed((
+                        new_token.access_token().clone(),
+                        new_token.refresh_token().clone(),
+                    )));
+
                     return Ok(new_token);
                 }
 
@@ -110,6 +141,12 @@ impl Core {
                 self.tokens
                     .lock()
                     .insert(client_id.to_string(), new_token.clone());
+
+                _ = self.tx.send(CoreEvent::TokenRefreshed((
+                    new_token.access_token().clone(),
+                    new_token.refresh_token().clone(),
+                )));
+
                 Ok(new_token)
             }
         }
@@ -127,9 +164,18 @@ impl Core {
     pub async fn get_token_with_code(&self, code: String) -> errors::EmptyResult {
         log::debug!("Requesting token with code {}", code);
         let token = auth::get_token_with_code(&self.reqwest_client, &code).await?;
-        let mut tokens = self.tokens.lock();
-        tokens.clear();
-        tokens.insert(GALAXY_CLIENT_ID.to_string(), token);
+
+        {
+            let mut tokens = self.tokens.lock();
+            tokens.clear();
+            tokens.insert(GALAXY_CLIENT_ID.to_string(), token.clone());
+        }
+
+        _ = self.tx.send(CoreEvent::TokenRefreshed((
+            token.access_token().clone(),
+            token.refresh_token().clone(),
+        )));
+
         Ok(())
     }
 
