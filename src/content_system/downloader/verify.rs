@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use super::{
     diff::DiffReport,
-    progress::{write_chunk_state, FileDownloadState},
+    progress::{write_chunk_state, DownloadState, FileDownloadState},
 };
 use crate::{
     content_system::{
@@ -43,6 +43,9 @@ async fn verify_v2_chunk_state(
     file_path: &Path,
     chunks: &[v2::Chunk],
     state: &[bool],
+    processed_size: &mut i64,
+    total_size: f32,
+    progress_sender: &tokio::sync::mpsc::Sender<DownloadState>,
 ) -> tokio::io::Result<(bool, Vec<bool>)> {
     if !file_path.exists() {
         return Ok((false, vec![]));
@@ -65,6 +68,12 @@ async fn verify_v2_chunk_state(
         }
         new_state.push(!chunk_entry_error);
         offset += chunk.size();
+        *processed_size += *chunk.size();
+        let _ = progress_sender
+            .send(DownloadState::Verifying(
+                (*processed_size as f32) / total_size * 100.0,
+            ))
+            .await;
     }
     Ok((correct, new_state))
 }
@@ -91,6 +100,24 @@ impl super::Downloader {
     // returns new diffreport in case patched files are to be re-downloaded
     pub async fn update_state(&self) -> DiffReport {
         let current_report = self.download_report.as_ref().unwrap();
+
+        let patches_size = current_report.patches.iter().fold(0, |size, patch| {
+            size + patch.diff.size() + patch.destination_file.size()
+        });
+
+        let downloads_size = current_report
+            .download
+            .iter()
+            .fold(0, |downloads_size, list| {
+                downloads_size
+                    + list
+                        .files
+                        .iter()
+                        .fold(0, |list_size, f| list_size + f.size())
+            });
+
+        let total_size = (patches_size + downloads_size) as f32;
+        let mut processed_size = 0;
 
         for list in &current_report.download {
             if let Some(sfc) = &list.sfc {
@@ -126,9 +153,31 @@ impl super::Downloader {
             }
 
             for file in &list.files {
-                let _ = self.verify_depot_entry_state(&list.product_id, file).await;
+                if file.size() == 0 {
+                    continue;
+                }
+                let _ = self
+                    .verify_depot_entry_state(&list.product_id, file, processed_size, total_size)
+                    .await;
+                processed_size += file.size();
             }
         }
+
+        for list in &current_report.patches {
+            // This creates a copy of processed_size that will be internally incremented based
+            // on which chunks are processed. Here its unknown whether we are going to process
+            // the patch or destination file
+            let _ = self
+                .verify_depot_entry_state(
+                    &list.product_id,
+                    &DepotEntry::V2(list.diff.clone()),
+                    processed_size,
+                    total_size,
+                )
+                .await;
+            processed_size += list.diff.size() + list.destination_file.size();
+        }
+
         current_report.clone()
     }
 
@@ -139,6 +188,8 @@ impl super::Downloader {
         &self,
         product_id: &str,
         depot_entry: &DepotEntry,
+        mut processed_size: i64,
+        total_size: f32,
     ) -> tokio::io::Result<()> {
         let entry_root = self.get_file_root(depot_entry.is_support(), product_id, false);
         let file_path = entry_root.join(depot_entry.path());
@@ -157,10 +208,23 @@ impl super::Downloader {
                             )
                             .await;
                         }
+                        let _ = self
+                            .progress_channel_sender
+                            .send(DownloadState::Verifying(
+                                (processed_size as f32) / total_size * 100.0,
+                            ))
+                            .await;
                     }
                     DepotEntry::V2(v2::DepotEntry::File(file)) => {
-                        let (correct, new_state) =
-                            verify_v2_chunk_state(&file_path, file.chunks(), &[]).await?;
+                        let (correct, new_state) = verify_v2_chunk_state(
+                            &file_path,
+                            file.chunks(),
+                            &[],
+                            &mut processed_size,
+                            total_size,
+                            &self.progress_channel_sender,
+                        )
+                        .await?;
                         if !correct {
                             log::info!("file {} corrupted", file_path.display());
                             self.set_file_status(
@@ -194,8 +258,15 @@ impl super::Downloader {
                     DepotEntry::V2(v2::DepotEntry::File(file)) => {
                         let file_path = format!("{}.download", file_path.to_str().unwrap());
                         let file_path = PathBuf::from(file_path);
-                        let (correct, new_state) =
-                            verify_v2_chunk_state(&file_path, file.chunks(), &state).await?;
+                        let (correct, new_state) = verify_v2_chunk_state(
+                            &file_path,
+                            file.chunks(),
+                            &state,
+                            &mut processed_size,
+                            total_size,
+                            &self.progress_channel_sender,
+                        )
+                        .await?;
                         if !correct {
                             let _ = write_new_chunk_state(&file_path, new_state).await;
                         }
@@ -205,8 +276,15 @@ impl super::Downloader {
                         // Partial Diff - patch itself is download partially
                         let diff_file = format!("{}.diff.download", file_path.to_str().unwrap());
                         let diff_file = PathBuf::from(diff_file);
-                        let (correct, new_state) =
-                            verify_v2_chunk_state(&diff_file, file.chunks(), &state).await?;
+                        let (correct, new_state) = verify_v2_chunk_state(
+                            &diff_file,
+                            file.chunks(),
+                            &state,
+                            &mut processed_size,
+                            total_size,
+                            &self.progress_channel_sender,
+                        )
+                        .await?;
                         if !correct {
                             let diff_file = format!("{}.diff", file_path.to_str().unwrap());
                             let diff_file = PathBuf::from(diff_file);
@@ -221,8 +299,15 @@ impl super::Downloader {
                     // Patch is ready - still needs to be applied to file
                     let diff_file = format!("{}.diff", file_path.to_str().unwrap());
                     let diff_file = PathBuf::from(diff_file);
-                    let (correct, new_state) =
-                        verify_v2_chunk_state(&diff_file, file.chunks(), &[]).await?;
+                    let (correct, new_state) = verify_v2_chunk_state(
+                        &diff_file,
+                        file.chunks(),
+                        &[],
+                        &mut processed_size,
+                        total_size,
+                        &self.progress_channel_sender,
+                    )
+                    .await?;
                     if !correct {
                         self.set_file_status(
                             &diff_file,

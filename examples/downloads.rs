@@ -91,7 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     while let Some(message) = reciever.recv().await {
-        if let DownloadState::Downloading(state) = message {
+        if let DownloadState::Verifying(state) = message {
+            log::debug!("Verifying {}%", state);
+        } else if let DownloadState::Downloading(state) = message {
             progress.set_length(state.total_size);
             progress.set_position(state.written);
         }
