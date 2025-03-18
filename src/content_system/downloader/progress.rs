@@ -1,3 +1,11 @@
+use crate::errors::{io_error, serde_error, EmptyResult};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use tokio::{
+    fs::{File, OpenOptions},
+    io::{AsyncReadExt, AsyncWriteExt},
+};
+
 pub(crate) enum DownloadFileStatus {
     NotInitialized,
     Allocated,
@@ -6,10 +14,25 @@ pub(crate) enum DownloadFileStatus {
     Done,
 }
 
+impl DownloadFileStatus {
+    pub fn path_with_state(&self, path: &Path) -> Option<PathBuf> {
+        match self {
+            Self::Done | Self::PatchDownloaded => Some(path.to_path_buf()),
+            Self::Partial(_) | Self::Allocated => Some(PathBuf::from(format!(
+                "{}.download",
+                path.to_str().unwrap()
+            ))),
+
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum DownloadState {
     Preparing,
     Allocating(f32),
+    Verifying(f32),
     Downloading(DownloadProgress),
     Finished,
 }
@@ -28,13 +51,6 @@ pub enum WorkerUpdate {
     Download(usize),
     Write(usize),
 }
-
-use crate::errors::{io_error, serde_error, EmptyResult};
-use serde::{Deserialize, Serialize};
-use tokio::{
-    fs::{File, OpenOptions},
-    io::{AsyncReadExt, AsyncWriteExt},
-};
 
 #[derive(Default, Serialize, Deserialize)]
 pub(crate) struct FileDownloadState {

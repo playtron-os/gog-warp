@@ -25,6 +25,7 @@ mod diff;
 mod patching;
 pub mod progress;
 mod utils;
+mod verify;
 mod worker;
 
 #[derive(Default)]
@@ -226,7 +227,7 @@ impl Builder {
     }
 
     /// Makes downloader verify the files from [`Self::manifest`]
-    /// and download invalid/missing ones
+    /// and download only invalid/missing ones
     pub fn verify(mut self) -> Self {
         self.verify = true;
         self
@@ -389,14 +390,17 @@ impl Downloader {
 
         let mut manifest_paths: HashMap<String, HashSet<String>> = HashMap::new();
         for depot in &depots {
-            let mut list = manifest_paths.remove(&depot.product_id).unwrap_or_default();
+            let mut list = HashSet::new();
             for file in &depot.files {
                 if file.is_support() {
                     continue;
                 }
                 list.insert(file.path());
             }
-            manifest_paths.insert(depot.product_id.clone(), list);
+            manifest_paths
+                .entry(depot.product_id.clone())
+                .and_modify(|l| l.extend(list.clone()))
+                .or_insert(list);
         }
 
         let results = diff::diff(depots, old_depots, patches.unwrap_or_default());
@@ -501,9 +505,32 @@ impl Downloader {
         }
     }
 
+    async fn set_file_status(
+        &self,
+        path: &Path,
+        from_status: progress::DownloadFileStatus,
+        to_status: progress::DownloadFileStatus,
+    ) {
+        let from_path: Option<PathBuf> = from_status.path_with_state(path);
+        let to_path: Option<PathBuf> = to_status.path_with_state(path);
+
+        if let (Some(from_p), Some(to_p)) = (from_path, to_path) {
+            log::info!("Renaming {:?} to {:?}", from_p, to_p);
+            if let Err(err) = tokio::fs::rename(&from_p, &to_p).await {
+                log::error!(
+                    "Failed to rename file {} to {} {:?}",
+                    from_p.display(),
+                    to_p.display(),
+                    err
+                );
+            }
+        }
+    }
+
     /// Execute the download.  
     /// Make sure to run this after [`Self::prepare`]
     pub async fn download(&self) -> Result<(), Error> {
+        let mut should_verify = self.verify;
         if self.download_report.is_none() {
             return Err(not_ready_error(
                 "download not ready, did you forget Downloader::prepare()?",
@@ -516,11 +543,10 @@ impl Downloader {
             2
         };
 
-        let timestamp = if let Some(manifest) = &self.manifest {
-            manifest.repository_timestamp()
-        } else {
-            None
-        };
+        let timestamp = self
+            .manifest
+            .as_ref()
+            .and_then(|m| m.repository_timestamp());
 
         let install_root = self.get_file_root(false, "0", false);
         if !install_root.exists() {
@@ -544,10 +570,8 @@ impl Downloader {
                 file.read_to_string(&mut buffer).await.map_err(io_error)?;
                 let current_build = buffer.trim();
                 if current_build != build_id {
-                    log::warn!("Found different download in progress, resetting the state");
-                    // TODO: Force a verify instead
-                    fs::remove_dir_all(&install_root).await.map_err(io_error)?;
-                    fs::create_dir_all(&install_root).await.map_err(io_error)?;
+                    log::warn!("Found different download in progress, verifying the state");
+                    should_verify = true;
                 }
             }
 
@@ -565,7 +589,12 @@ impl Downloader {
             file.flush().await.map_err(io_error)?;
         }
 
-        let report = self.download_report.clone().unwrap();
+        let report = if should_verify {
+            log::debug!("Verifying download state");
+            self.update_state().await
+        } else {
+            self.download_report.clone().unwrap()
+        };
         let mut new_symlinks: Vec<(String, String)> = Vec::new();
         let mut ready_files: HashSet<String> = HashSet::new();
         let mut ready_patches: HashSet<String> = HashSet::new();
@@ -1015,7 +1044,15 @@ impl Downloader {
                 result = handles.join_next() => {
                     match result {
                         Some(result) => {
-                            result.map_err(task_error)??;
+                            let join_res = result.map_err(task_error);
+                            if join_res.is_err() {
+                                handles.shutdown().await;
+                            }
+                            let task_res = join_res?;
+                            if task_res.is_err() {
+                                handles.shutdown().await;
+                            }
+                            task_res?;
                         },
                         None => break
                     }

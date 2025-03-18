@@ -7,6 +7,7 @@ use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    simple_logger::init_with_env()?;
     // Init core
     let core = gog_warp::Core::new();
     println!("Created warp instance");
@@ -33,6 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Obtain the manifest, you should store it for later along with the build_id
     let latest_manifest = core.get_manifest(latest).await?;
     println!("Got manifest");
+    println!("Available languages: {:?}", latest_manifest.languages());
 
     // Providing dependencies manifest enables gog-warp to obtain game scoped dependencies
     // like DOSBOX, ScummVM, language_setup and similar utilities
@@ -49,6 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .support_root(format!("{}/Games/warptest/support", home).into())
         .manifest(latest_manifest, latest.build_id())
         .game_dependencies(dependencies_manifest)
+        // Add verify to check files that will be modified
+        // to verify existing game files simply dont use upgrade_from
+        //.verify()
         .build()?;
     println!("Built downloader");
 

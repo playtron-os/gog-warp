@@ -5,14 +5,19 @@ use tokio::fs::File;
 
 #[cfg(target_os = "linux")]
 pub async fn allocate(file: File, size: i64) -> Result<(), Error> {
-    use std::os::fd::AsRawFd;
+    use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
 
     if size == 0 {
         return Ok(());
     }
+    let metadata = file.metadata().await.map_err(io_error)?;
     tokio::task::spawn_blocking(move || {
         let fd = file.as_raw_fd();
-        let result = unsafe { libc::fallocate(fd, 0, 0, size) };
+        let result = if metadata.size() as i64 > size {
+            unsafe { libc::ftruncate(fd, size) }
+        } else {
+            unsafe { libc::fallocate(fd, 0, 0, size) }
+        };
 
         if result != 0 {
             return Err(io_error("allocation error"));
