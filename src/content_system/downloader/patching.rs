@@ -61,6 +61,7 @@ pub fn patch_file(
     source.curblk = source_block.as_ptr();
 
     src.seek(std::io::SeekFrom::Start(0)).map_err(io_error)?;
+    out.seek(std::io::SeekFrom::Start(0)).map_err(io_error)?;
 
     source.onblk = src.read(&mut source_block).map_err(io_error)? as u32;
     source.curblkno = 0;
