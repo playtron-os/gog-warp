@@ -16,7 +16,12 @@ use tokio::io::AsyncReadExt;
 
 #[derive(Clone)]
 pub enum CoreEvent {
-    TokenRefreshed((String, String)),
+    TokenRefreshed {
+        client_id: String,
+        user_id: String,
+        access_token: String,
+        refresh_token: String,
+    },
 }
 
 /// Library entry point  
@@ -75,6 +80,12 @@ impl Core {
         Ok(())
     }
 
+    /// Skips refreshing, only returns current token from local store
+    pub fn get_token_raw(&self, client_id: &str) -> Option<Token> {
+        let tokens = self.tokens.lock();
+        tokens.get(client_id).cloned()
+    }
+
     pub fn serialize_tokens(&self) -> Result<String, errors::Error> {
         let tokens = self.tokens.lock();
         serde_json::to_string(&*tokens).map_err(errors::serde_error)
@@ -121,10 +132,12 @@ impl Core {
                         .lock()
                         .insert(client_id.to_string(), new_token.clone());
 
-                    _ = self.tx.send(CoreEvent::TokenRefreshed((
-                        new_token.access_token().clone(),
-                        new_token.refresh_token().clone(),
-                    )));
+                    _ = self.tx.send(CoreEvent::TokenRefreshed {
+                        client_id: client_id.to_string(),
+                        user_id: token.user_id().clone(),
+                        access_token: new_token.access_token().clone(),
+                        refresh_token: new_token.refresh_token().clone(),
+                    });
 
                     return Ok(new_token);
                 }
@@ -142,10 +155,12 @@ impl Core {
                     .lock()
                     .insert(client_id.to_string(), new_token.clone());
 
-                _ = self.tx.send(CoreEvent::TokenRefreshed((
-                    new_token.access_token().clone(),
-                    new_token.refresh_token().clone(),
-                )));
+                _ = self.tx.send(CoreEvent::TokenRefreshed {
+                    client_id: client_id.to_string(),
+                    user_id: new_token.user_id().clone(),
+                    access_token: new_token.access_token().clone(),
+                    refresh_token: new_token.refresh_token().clone(),
+                });
 
                 Ok(new_token)
             }
@@ -171,10 +186,42 @@ impl Core {
             tokens.insert(GALAXY_CLIENT_ID.to_string(), token.clone());
         }
 
-        _ = self.tx.send(CoreEvent::TokenRefreshed((
-            token.access_token().clone(),
-            token.refresh_token().clone(),
-        )));
+        _ = self.tx.send(CoreEvent::TokenRefreshed {
+            client_id: GALAXY_CLIENT_ID.to_string(),
+            user_id: token.user_id().clone(),
+            access_token: token.access_token().clone(),
+            refresh_token: token.refresh_token().clone(),
+        });
+
+        Ok(())
+    }
+
+    /// Lets you start a session by using galaxy refresh token
+    pub async fn start_session_from_refresh_token(
+        &self,
+        refresh_token: String,
+    ) -> errors::EmptyResult {
+        log::debug!("Requesting token for galaxy refresh token");
+        let galaxy_token = Token::refresh(refresh_token);
+        let token = auth::get_token_for(
+            &self.reqwest_client,
+            GALAXY_CLIENT_ID,
+            GALAXY_CLIENT_SECRET,
+            galaxy_token,
+        )
+        .await?;
+
+        {
+            let mut tokens = self.tokens.lock();
+            tokens.clear();
+            tokens.insert(GALAXY_CLIENT_ID.to_string(), token.clone());
+        }
+        _ = self.tx.send(CoreEvent::TokenRefreshed {
+            client_id: GALAXY_CLIENT_ID.to_string(),
+            user_id: token.user_id().clone(),
+            access_token: token.access_token().clone(),
+            refresh_token: token.refresh_token().clone(),
+        });
 
         Ok(())
     }
