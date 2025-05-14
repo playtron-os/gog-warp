@@ -4,6 +4,7 @@ use serde::Deserialize;
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct GameInfo {
+    pub build_id: Option<String>,
     pub client_id: Option<String>,
     pub game_id: String,
     pub language: String,

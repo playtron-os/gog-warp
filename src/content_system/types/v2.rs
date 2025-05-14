@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::content_system::languages;
 use derive_getters::{Dissolve, Getters};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,8 @@ pub struct Manifest {
     script_interpreter: bool,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(flatten)]
+    unknown_fields: HashMap<String, serde_json::Value>
 }
 
 #[derive(Serialize, Deserialize, Getters, Debug, Clone)]
@@ -31,6 +34,8 @@ pub struct ManifestDepot {
     languages: Vec<String>,
     manifest: String,
     product_id: String,
+    #[serde(flatten)]
+    unknown_fields: HashMap<String, serde_json::Value>
 }
 
 #[derive(Serialize, Deserialize, Getters, Debug, Clone)]

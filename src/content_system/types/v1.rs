@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Getters, Debug, Clone)]
 pub struct Manifest {
     product: ManifestProduct,
+    #[serde(flatten)]
+    unknown_fields: HashMap<String, serde_json::Value>
 }
 
 #[derive(Serialize, Deserialize, Getters, Debug, Clone)]
@@ -20,6 +22,8 @@ pub struct ManifestProduct {
     game_ids: Vec<GameID>,
     #[serde(rename = "rootGameID")]
     root_game_id: String,
+    #[serde(flatten)]
+    unknown_fields: HashMap<String, serde_json::Value>
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
