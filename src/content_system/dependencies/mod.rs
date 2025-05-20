@@ -25,10 +25,14 @@ impl DependenciesManifest {
         &self,
         reqwest_client: Client,
         wanted_dependencies: &[String],
-        _global: bool,
+        global: bool,
     ) -> Result<Vec<FileList>, crate::Error> {
         let mut lists = Vec::new();
         for depot in &self.depots {
+            let is_global = !depot.executable.path.is_empty();
+            if global && !is_global {
+                continue;
+            }
             if wanted_dependencies
                 .iter()
                 .any(|dep| &depot.dependency_id == dep)

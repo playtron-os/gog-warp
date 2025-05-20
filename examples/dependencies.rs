@@ -2,6 +2,7 @@ use gog_warp::{content_system::dependencies::get_manifest, Downloader};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    simple_logger::init_with_env()?;
     let core = gog_warp::Core::new();
 
     let manifest = get_manifest(core.reqwest_client().clone()).await?;

@@ -69,11 +69,9 @@ async fn verify_v2_chunk_state(
         new_state.push(!chunk_entry_error);
         offset += chunk.size();
         *processed_size += *chunk.size();
-        let _ = progress_sender
-            .send(DownloadState::Verifying(
-                (*processed_size as f32) / total_size * 100.0,
-            ))
-            .await;
+        let _ = progress_sender.try_send(DownloadState::Verifying(
+            (*processed_size as f32) / total_size * 100.0,
+        ));
     }
     Ok((correct, new_state))
 }
@@ -210,10 +208,9 @@ impl super::Downloader {
                         }
                         let _ = self
                             .progress_channel_sender
-                            .send(DownloadState::Verifying(
+                            .try_send(DownloadState::Verifying(
                                 (processed_size as f32) / total_size * 100.0,
-                            ))
-                            .await;
+                            ));
                     }
                     DepotEntry::V2(v2::DepotEntry::File(file)) => {
                         let (correct, new_state) = verify_v2_chunk_state(

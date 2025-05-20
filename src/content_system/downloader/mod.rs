@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::content_system::secure_link;
-use crate::errors::{cancelled_error, serde_error, task_error};
+use crate::errors::{cancelled_error, task_error};
 use crate::{
     errors::{dbuilder_error, io_error, not_ready_error},
     Core, Error,
@@ -11,7 +12,7 @@ use crate::{
 
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{error::TryRecvError, Receiver, Sender};
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
@@ -123,7 +124,6 @@ impl Builder {
             old_global_dependencies,
             dependency_manifest,
             download_report: None,
-            path_lists: None,
             max_speed: Mutex::new(-1),
         })
     }
@@ -274,7 +274,6 @@ pub struct Downloader {
 
     cancellation_token: CancellationToken,
     download_report: Option<diff::DiffReport>,
-    path_lists: Option<HashMap<String, HashSet<String>>>,
     max_speed: Mutex<i32>,
 }
 
@@ -388,24 +387,8 @@ impl Downloader {
         )
         .await?;
 
-        let mut manifest_paths: HashMap<String, HashSet<String>> = HashMap::new();
-        for depot in &depots {
-            let mut list = HashSet::new();
-            for file in &depot.files {
-                if file.is_support() {
-                    continue;
-                }
-                list.insert(file.path());
-            }
-            manifest_paths
-                .entry(depot.product_id.clone())
-                .and_modify(|l| l.extend(list.clone()))
-                .or_insert(list);
-        }
-
         let results = diff::diff(depots, old_depots, patches.unwrap_or_default());
         self.download_report = Some(results);
-        self.path_lists = Some(manifest_paths);
         Ok(())
     }
 
@@ -735,8 +718,7 @@ impl Downloader {
             let allocation_progress = allocated_files as f32 / report.number_of_files as f32;
             let _ = self
                 .progress_channel_sender
-                .send(DownloadState::Allocating(allocation_progress))
-                .await;
+                .try_send(DownloadState::Allocating(allocation_progress));
 
             let mut secure_links = secure_links.lock().await;
             let product_id = file_list.product_id();
@@ -863,20 +845,23 @@ impl Downloader {
         let progress_report = tokio::spawn(async move {
             let mut timestamp = tokio::time::Instant::now();
             let one_sec = tokio::time::Duration::from_secs(1);
-            while let Some(message) = rx.recv().await {
-                let mut progress = report_download_progress.lock().await;
-                match message {
-                    WorkerUpdate::Download(size) => progress.downloaded += size as u64,
-                    WorkerUpdate::Write(size) => progress.written += size as u64,
-                }
-                if timestamp.elapsed() > tokio::time::Duration::from_millis(500) {
-                    timestamp = tokio::time::Instant::now();
-                    let _ = progress_channel_sender
-                        .send_timeout(
-                            DownloadState::Downloading((*progress).clone()),
-                            tokio::time::Duration::from_millis(500),
-                        )
-                        .await;
+
+            loop {
+                match rx.try_recv() {
+                    Ok(message) => {
+                        let mut progress = report_download_progress.lock().await;
+                        match message {
+                            WorkerUpdate::Download(size) => progress.downloaded += size as u64,
+                            WorkerUpdate::Write(size) => progress.written += size as u64,
+                        }
+                        if timestamp.elapsed() > tokio::time::Duration::from_millis(500) {
+                            timestamp = tokio::time::Instant::now();
+                            let _ = progress_channel_sender
+                                .try_send(DownloadState::Downloading((*progress).clone()));
+                        }
+                    }
+                    Err(TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => tokio::time::sleep(Duration::from_millis(50)).await,
                 }
             }
             let progress = report_download_progress.lock().await;
@@ -1231,20 +1216,6 @@ impl Downloader {
             }
         }
 
-        if let Some(paths) = &self.path_lists {
-            log::debug!("Writing final file list");
-            let data = serde_json::to_string(paths).map_err(serde_error)?;
-            let root = self.get_file_root(false, "0", true);
-            let path = root.join(".warp-fileList.json");
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .create(true)
-                .open(path)
-                .await
-                .map_err(io_error)?;
-            file.write_all(data.as_bytes()).await.map_err(io_error)?;
-        }
         let build_id_file = self
             .get_file_root(false, "0", false)
             .join(".gog-warp-build");

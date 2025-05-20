@@ -11,10 +11,22 @@ fn main() {
         ("SHELL_TESTS".to_string(), "0".to_string()),
         ("XD3_ENCODER".to_string(), "0".to_string()),
         ("XD3_USE_LARGEFILE64".to_string(), "1".to_string()),
-        ("SIZEOF_SIZE_T".to_string(), std::mem::size_of::<usize>().to_string()),
-        ("SIZEOF_UNSIGNED_INT".to_string(), std::mem::size_of::<std::os::raw::c_uint>().to_string()),
-        ("SIZEOF_UNSIGNED_LONG".to_string(), std::mem::size_of::<std::os::raw::c_ulong>().to_string()),
-        ("SIZEOF_UNSIGNED_LONG_LONG".to_string(), std::mem::size_of::<std::os::raw::c_ulonglong>().to_string()),
+        (
+            "SIZEOF_SIZE_T".to_string(),
+            std::mem::size_of::<usize>().to_string(),
+        ),
+        (
+            "SIZEOF_UNSIGNED_INT".to_string(),
+            std::mem::size_of::<std::os::raw::c_uint>().to_string(),
+        ),
+        (
+            "SIZEOF_UNSIGNED_LONG".to_string(),
+            std::mem::size_of::<std::os::raw::c_ulong>().to_string(),
+        ),
+        (
+            "SIZEOF_UNSIGNED_LONG_LONG".to_string(),
+            std::mem::size_of::<std::os::raw::c_ulonglong>().to_string(),
+        ),
     ];
 
     {
