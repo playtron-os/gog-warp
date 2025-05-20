@@ -331,10 +331,7 @@ impl Downloader {
             let reqwest_client = self.core.reqwest_client();
             if let Some(manifest) = &self.manifest {
                 log::trace!("Collecting dependencies depots");
-                let mut dependencies = manifest.dependencies();
-                if manifest.needs_isi() {
-                    dependencies.push("ISI".to_string());
-                }
+                let dependencies = manifest.dependencies();
                 let new_deps = dm
                     .get_depots(reqwest_client.clone(), &dependencies, false)
                     .await?;
@@ -342,10 +339,7 @@ impl Downloader {
             }
 
             if let Some(om) = &self.old_manifest {
-                let mut dependencies = om.dependencies();
-                if om.needs_isi() {
-                    dependencies.push("ISI".to_string());
-                }
+                let dependencies = om.dependencies();
                 let old_deps = dm
                     .get_depots(reqwest_client.clone(), &dependencies, false)
                     .await?;
