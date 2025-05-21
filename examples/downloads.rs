@@ -51,6 +51,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .support_root(format!("{}/Games/warptest/support", home).into())
         .manifest(latest_manifest, latest.build_id())
         .game_dependencies(dependencies_manifest)
+        // Global dependencies will be directed here
+        .global_dependencies_root(format!("{}/Games/warptest/redist", home).into())
         // Add verify to check files that will be modified
         // to verify existing game files simply dont use upgrade_from
         //.verify()

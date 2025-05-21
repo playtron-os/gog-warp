@@ -23,6 +23,7 @@ pub mod v2;
 pub struct FileList {
     pub(crate) product_id: String,
     pub(crate) is_dependency: bool,
+    pub(crate) is_global_dependency: bool,
     pub(crate) files: Vec<DepotEntry>,
     pub(crate) sfc: Option<v2::SmallFilesContainer>,
 }
@@ -32,6 +33,7 @@ impl FileList {
         Self {
             product_id,
             is_dependency: false,
+            is_global_dependency: false,
             files,
             sfc: None,
         }

@@ -120,7 +120,8 @@ impl super::Downloader {
         for list in &current_report.download {
             if let Some(sfc) = &list.sfc {
                 let chunk = sfc.chunks().first().unwrap();
-                let entry_root = self.get_file_root(false, &list.product_id, false);
+                let entry_root =
+                    self.get_file_root(false, list.is_global_dependency, &list.product_id, false);
                 let file_path = entry_root.join(chunk.md5());
                 if let DownloadFileStatus::Done = self.get_file_status(&file_path).await {
                     let mut offset = 0;
@@ -155,7 +156,13 @@ impl super::Downloader {
                     continue;
                 }
                 let _ = self
-                    .verify_depot_entry_state(&list.product_id, file, processed_size, total_size)
+                    .verify_depot_entry_state(
+                        &list.product_id,
+                        list.is_global_dependency,
+                        file,
+                        processed_size,
+                        total_size,
+                    )
                     .await;
                 processed_size += file.size();
             }
@@ -168,6 +175,7 @@ impl super::Downloader {
             let _ = self
                 .verify_depot_entry_state(
                     &list.product_id,
+                    false,
                     &DepotEntry::V2(list.diff.clone()),
                     processed_size,
                     total_size,
@@ -185,11 +193,17 @@ impl super::Downloader {
     async fn verify_depot_entry_state(
         &self,
         product_id: &str,
+        is_global_dependency: bool,
         depot_entry: &DepotEntry,
         mut processed_size: i64,
         total_size: f32,
     ) -> tokio::io::Result<()> {
-        let entry_root = self.get_file_root(depot_entry.is_support(), product_id, false);
+        let entry_root = self.get_file_root(
+            depot_entry.is_support(),
+            is_global_dependency,
+            product_id,
+            false,
+        );
         let file_path = entry_root.join(depot_entry.path());
         match self.get_file_status(&file_path).await {
             DownloadFileStatus::Done => {

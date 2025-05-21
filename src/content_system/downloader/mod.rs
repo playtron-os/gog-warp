@@ -39,9 +39,8 @@ pub struct Builder {
     install_root: Option<PathBuf>,
     install_path: Option<PathBuf>,
     support_root: Option<PathBuf>,
+    global_dependencies_root: Option<PathBuf>,
     dependency_manifest: Option<DependenciesManifest>,
-    global_dependencies: Vec<String>,
-    old_global_dependencies: Vec<String>,
     language: Option<String>,
     old_language: Option<String>,
     dlcs: Vec<String>,
@@ -78,6 +77,11 @@ impl Builder {
             None => install_path.join("gog-support"),
         };
 
+        let global_dependencies_root = match self.global_dependencies_root {
+            Some(gdr) => gdr,
+            None => install_path.clone(),
+        };
+
         let support_path = match &manifest {
             Some(Manifest::V2(m)) => support_path.join(m.base_product_id()),
             Some(Manifest::V1(m)) => support_path.join(m.product().root_game_id()),
@@ -94,8 +98,6 @@ impl Builder {
         let old_dlcs = self.old_dlcs;
         let verify = self.verify;
         let dependency_manifest = self.dependency_manifest;
-        let global_dependencies = self.global_dependencies;
-        let old_global_dependencies = self.old_global_dependencies;
 
         if (!old_dlcs.is_empty() || language != old_language) && old_manifest.is_none() {
             old_manifest.clone_from(&manifest);
@@ -120,8 +122,7 @@ impl Builder {
             progress_channel_sender,
             progress_channel_receiver: Some(progress_channel_receiver),
             cancellation_token: CancellationToken::new(),
-            global_dependencies,
-            old_global_dependencies,
+            global_dependencies_root,
             dependency_manifest,
             download_report: None,
             max_speed: Mutex::new(-1),
@@ -207,22 +208,10 @@ impl Builder {
         self
     }
 
-    /// Allows to download only global dependencies
-    /// When this is provided you can safely not provide any other parameter
-    pub fn global_dependencies(
-        mut self,
-        dependencies_manifest: DependenciesManifest,
-        dependencies: Vec<String>,
-    ) -> Self {
-        self.dependency_manifest = Some(dependencies_manifest);
-        self.global_dependencies = dependencies;
-        self
-    }
-
-    /// When provided allows to delete unused dependencies.
-    /// To be used together with [`Self::global_dependencies`]
-    pub fn old_global_dependencies(mut self, dependencies: Vec<String>) -> Self {
-        self.old_global_dependencies = dependencies;
+    /// Allows to specify where global dependencies should be saved to
+    /// Otherwise, dependencies will be saved to game directory
+    pub fn global_dependencies_root(mut self, global_dependencies_root: PathBuf) -> Self {
+        self.global_dependencies_root = Some(global_dependencies_root);
         self
     }
 
@@ -260,14 +249,12 @@ pub struct Downloader {
     support_path: PathBuf,
     /// Tmp path for update files
     tmp_path: PathBuf,
+    /// Global dependencies location
+    global_dependencies_root: PathBuf,
     /// Whether to verify the files based on the manifest
     verify: bool,
     /// Manifest to use for dependencies
     dependency_manifest: Option<DependenciesManifest>,
-    /// Global dependencies to upgrade to
-    global_dependencies: Vec<String>,
-    /// Global dependencies to upgrade from
-    old_global_dependencies: Vec<String>,
 
     progress_channel_sender: Sender<DownloadState>,
     progress_channel_receiver: Option<Receiver<DownloadState>>,
@@ -332,33 +319,17 @@ impl Downloader {
             if let Some(manifest) = &self.manifest {
                 log::trace!("Collecting dependencies depots");
                 let dependencies = manifest.dependencies();
-                let new_deps = dm
-                    .get_depots(reqwest_client.clone(), &dependencies, false)
-                    .await?;
+                let new_deps = dm.get_depots(reqwest_client.clone(), &dependencies).await?;
                 depots.extend(new_deps);
             }
 
             if let Some(om) = &self.old_manifest {
-                let dependencies = om.dependencies();
-                let old_deps = dm
-                    .get_depots(reqwest_client.clone(), &dependencies, false)
-                    .await?;
+                let mut dependencies = om.dependencies();
+                if om.needs_isi() {
+                    dependencies.push("ISI".to_string());
+                }
+                let old_deps = dm.get_depots(reqwest_client.clone(), &dependencies).await?;
                 old_depots.extend(old_deps);
-            }
-
-            if !self.global_dependencies.is_empty() {
-                log::trace!("Collecting global dependencies depots");
-                let global_deps = dm
-                    .get_depots(reqwest_client.clone(), &self.global_dependencies, true)
-                    .await?;
-                depots.extend(global_deps);
-            }
-
-            if !self.old_global_dependencies.is_empty() {
-                let old_global_deps = dm
-                    .get_depots(reqwest_client.clone(), &self.old_global_dependencies, true)
-                    .await?;
-                old_depots.extend(old_global_deps);
             }
         }
 
@@ -395,7 +366,8 @@ impl Downloader {
         // we are not subtracting deleted files sizes
         for list in &report.download {
             if let Some(sfc) = &list.sfc {
-                let file_root = self.get_file_root(false, &list.product_id, false);
+                let file_root =
+                    self.get_file_root(false, list.is_global_dependency, &list.product_id, false);
                 let chunk = sfc.chunks().first().unwrap();
                 let file_path = file_root.join(chunk.md5());
                 let status = self.get_file_status(&file_path).await;
@@ -407,7 +379,12 @@ impl Downloader {
                 if entry.is_dir() {
                     continue;
                 }
-                let file_root = self.get_file_root(entry.is_support(), &list.product_id, false);
+                let file_root = self.get_file_root(
+                    entry.is_support(),
+                    list.is_global_dependency,
+                    &list.product_id,
+                    false,
+                );
                 let file_path = file_root.join(entry.path());
                 let status = self.get_file_status(&file_path).await;
 
@@ -418,7 +395,7 @@ impl Downloader {
         }
 
         for patch in &report.patches {
-            let file_root = self.get_file_root(false, &patch.product_id, false);
+            let file_root = self.get_file_root(false, false, &patch.product_id, false);
             let file_path = file_root.join(patch.diff.path());
             let status = self.get_file_status(&file_path).await;
             if matches!(status, progress::DownloadFileStatus::NotInitialized) {
@@ -433,6 +410,7 @@ impl Downloader {
     fn get_file_root(
         &self,
         is_support: bool,
+        is_global_dep: bool,
         product_id: &str,
         final_destination: bool,
     ) -> PathBuf {
@@ -444,6 +422,8 @@ impl Downloader {
             } else {
                 self.support_path.clone()
             }
+        } else if is_global_dep {
+            self.global_dependencies_root.clone()
         } else {
             self.install_path.clone()
         }
@@ -525,9 +505,15 @@ impl Downloader {
             .as_ref()
             .and_then(|m| m.repository_timestamp());
 
-        let install_root = self.get_file_root(false, "0", false);
+        let install_root = self.get_file_root(false, false, "0", false);
         if !install_root.exists() {
             fs::create_dir_all(&install_root).await.map_err(io_error)?;
+        }
+        let dep_install_root = self.get_file_root(false, true, "0", false);
+        if !dep_install_root.exists() {
+            fs::create_dir_all(dep_install_root)
+                .await
+                .map_err(io_error)?;
         }
 
         log::info!("Checking for interrupted downloads");
@@ -590,7 +576,12 @@ impl Downloader {
                     log::warn!("sfc chunk count != 1");
                 }
                 let chunk = sfc.chunks().first().unwrap();
-                let install_root = self.get_file_root(false, &file_list.product_id, false);
+                let install_root = self.get_file_root(
+                    false,
+                    file_list.is_global_dependency,
+                    &file_list.product_id,
+                    false,
+                );
                 let file_path = install_root.join(chunk.md5());
                 let size = *chunk.size();
                 download_progress.total_download += *chunk.compressed_size() as u64;
@@ -621,8 +612,12 @@ impl Downloader {
                 // e.g Binaries/Game.exe -> binaries/Game.exe
                 // In the future detect ext4 case-folding and use that as well
                 let entry_path = entry.path();
-                let entry_root =
-                    self.get_file_root(entry.is_support(), &file_list.product_id, false);
+                let entry_root = self.get_file_root(
+                    entry.is_support(),
+                    file_list.is_global_dependency,
+                    &file_list.product_id,
+                    false,
+                );
                 let file_path = entry_root.join(&entry_path);
                 if entry.is_dir() {
                     fs::create_dir_all(file_path).await.map_err(io_error)?;
@@ -664,7 +659,12 @@ impl Downloader {
                         DepotEntry::V2(v2::DepotEntry::Link(link)) => {
                             let link_path = link.path();
                             let target_path = link.target();
-                            let link_root = self.get_file_root(false, &file_list.product_id, true);
+                            let link_root = self.get_file_root(
+                                false,
+                                file_list.is_global_dependency,
+                                &file_list.product_id,
+                                true,
+                            );
                             let link_path = link_root.join(link_path);
                             let link_path = link_path.to_str().unwrap();
                             new_symlinks.push((link_path.to_owned(), target_path.to_owned()));
@@ -753,7 +753,8 @@ impl Downloader {
         for patch in &report.patches {
             let entry = &patch.diff;
             let entry_path = entry.path();
-            let entry_root = self.get_file_root(entry.is_support(), &patch.product_id, false);
+            let entry_root =
+                self.get_file_root(entry.is_support(), false, &patch.product_id, false);
             let file_path = entry_root.join(&entry_path);
             let file_parent = file_path.parent().unwrap();
             if !file_parent.exists() {
@@ -872,7 +873,12 @@ impl Downloader {
             if let Some(sfc) = &list.sfc {
                 let chunk = sfc.chunks().first().unwrap();
                 if !ready_files.contains(chunk.md5()) {
-                    let entry_root = self.get_file_root(false, &list.product_id, false);
+                    let entry_root = self.get_file_root(
+                        false,
+                        list.is_global_dependency,
+                        &list.product_id,
+                        false,
+                    );
                     let file_path = entry_root.join(chunk.md5());
 
                     let product_id = list.product_id();
@@ -914,7 +920,12 @@ impl Downloader {
                 if ready_files.contains(&file_path) || file.is_dir() {
                     continue;
                 }
-                let root = self.get_file_root(file.is_support(), &list.product_id, false);
+                let root = self.get_file_root(
+                    file.is_support(),
+                    list.is_global_dependency,
+                    &list.product_id,
+                    false,
+                );
                 let file_path = root.join(file_path);
                 match file {
                     DepotEntry::V2(v2_entry) => {
@@ -988,7 +999,7 @@ impl Downloader {
                 continue;
             }
             let entry_path = format!("{}.diff", entry_path);
-            let entry_root = self.get_file_root(file.is_support(), &patch.product_id, false);
+            let entry_root = self.get_file_root(file.is_support(), false, &patch.product_id, false);
             let file_path = entry_root.join(&entry_path);
 
             let file_semaphore = file_semaphore.clone();
@@ -1049,7 +1060,8 @@ impl Downloader {
         for list in &report.download {
             if let Some(sfc) = &list.sfc {
                 let chunk = sfc.chunks().first().unwrap();
-                let entry_root = self.get_file_root(false, &list.product_id, false);
+                let entry_root =
+                    self.get_file_root(false, list.is_global_dependency, &list.product_id, false);
                 let sfc_path = entry_root.join(chunk.md5());
 
                 let mut sfc_handle = fs::OpenOptions::new()
@@ -1062,8 +1074,12 @@ impl Downloader {
                     if let DepotEntry::V2(v2::DepotEntry::File(v2_file)) = &file {
                         if let Some(sfc_ref) = &v2_file.sfc_ref {
                             let file_path = file.path();
-                            let entry_root =
-                                self.get_file_root(file.is_support(), &list.product_id, false);
+                            let entry_root = self.get_file_root(
+                                file.is_support(),
+                                list.is_global_dependency,
+                                &list.product_id,
+                                false,
+                            );
                             let file_path = entry_root.join(file_path);
                             if matches!(
                                 self.get_file_status(&file_path).await,
@@ -1107,8 +1123,8 @@ impl Downloader {
         for patch in &report.patches {
             if let v2::DepotEntry::Diff(_diff) = &patch.diff {
                 let file_path = patch.diff.path();
-                let tmp_root = self.get_file_root(false, &patch.product_id, false);
-                let dst_root = self.get_file_root(false, &patch.product_id, true);
+                let tmp_root = self.get_file_root(false, false, &patch.product_id, false);
+                let dst_root = self.get_file_root(false, false, &patch.product_id, true);
 
                 let diff_path = format!("{}.diff", file_path);
 
@@ -1151,10 +1167,18 @@ impl Downloader {
             for list in &report.download {
                 for file in &list.files {
                     let file_path = file.path();
-                    let tmp_entry_root =
-                        self.get_file_root(file.is_support(), &list.product_id, false);
-                    let dst_entry_root =
-                        self.get_file_root(file.is_support(), &list.product_id, true);
+                    let tmp_entry_root = self.get_file_root(
+                        file.is_support(),
+                        list.is_global_dependency,
+                        &list.product_id,
+                        false,
+                    );
+                    let dst_entry_root = self.get_file_root(
+                        file.is_support(),
+                        list.is_global_dependency,
+                        &list.product_id,
+                        true,
+                    );
 
                     let final_path = dst_entry_root.join(&file_path);
 
@@ -1172,8 +1196,9 @@ impl Downloader {
                 let file = &entry.diff;
                 let file_path = file.path();
                 let tmp_entry_root =
-                    self.get_file_root(file.is_support(), &entry.product_id, false);
-                let dst_entry_root = self.get_file_root(file.is_support(), &entry.product_id, true);
+                    self.get_file_root(file.is_support(), false, &entry.product_id, false);
+                let dst_entry_root =
+                    self.get_file_root(file.is_support(), false, &entry.product_id, true);
 
                 let final_path = dst_entry_root.join(&file_path);
 
@@ -1186,7 +1211,7 @@ impl Downloader {
                     .await
                     .map_err(io_error)?;
             }
-            let tmp_root = self.get_file_root(false, "0", false);
+            let tmp_root = self.get_file_root(false, false, "0", false);
             fs::remove_dir_all(tmp_root).await.map_err(io_error)?;
         }
 
@@ -1202,7 +1227,7 @@ impl Downloader {
 
         for file in &report.deleted {
             let file_path = file.path();
-            let root = self.get_file_root(file.is_support(), "0", true);
+            let root = self.get_file_root(file.is_support(), false, "0", true);
             let file_path = root.join(file_path);
             if file_path.exists() {
                 log::debug!("Removing {:?}", file_path);
@@ -1211,7 +1236,7 @@ impl Downloader {
         }
 
         let build_id_file = self
-            .get_file_root(false, "0", false)
+            .get_file_root(false, false, "0", false)
             .join(".gog-warp-build");
         if build_id_file.exists() {
             fs::remove_file(build_id_file).await.map_err(io_error)?;

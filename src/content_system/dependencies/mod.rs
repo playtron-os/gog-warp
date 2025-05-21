@@ -25,14 +25,10 @@ impl DependenciesManifest {
         &self,
         reqwest_client: Client,
         wanted_dependencies: &[String],
-        global: bool,
     ) -> Result<Vec<FileList>, crate::Error> {
         let mut lists = Vec::new();
         for depot in &self.depots {
             let is_global = !depot.executable.path.is_empty();
-            if global && !is_global {
-                continue;
-            }
             if wanted_dependencies
                 .iter()
                 .any(|dep| &depot.dependency_id == dep)
@@ -58,6 +54,7 @@ impl DependenciesManifest {
                 let entries = entries.into_iter().map(DepotEntry::V2).collect();
                 let mut f_list = FileList::new(depot.dependency_id.clone(), entries);
                 f_list.is_dependency = true;
+                f_list.is_global_dependency = is_global;
                 lists.push(f_list);
             }
         }
