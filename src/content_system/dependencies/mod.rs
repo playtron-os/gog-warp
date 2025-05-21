@@ -12,7 +12,7 @@ use crate::utils::reqwest_exponential_backoff;
 pub const DEPENDENCIES_URL: &str =
     "https://content-system.gog.com/dependencies/repository?generation=2";
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DependenciesManifest {
     pub depots: Vec<DependencyDepot>,
 }
@@ -65,7 +65,7 @@ impl DependenciesManifest {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DependencyDepot {
     pub compressed_size: u64,
@@ -80,7 +80,7 @@ pub struct DependencyDepot {
     pub signature: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DependencyExecutable {
     pub arguments: String,
     pub path: String,
