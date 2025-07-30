@@ -40,6 +40,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // like DOSBOX, ScummVM, language_setup and similar utilities
     let dependencies_manifest = core.get_dependencies_manifest().await?;
 
+    let (dl, inst) = latest_manifest.install_size(
+        &"en-US".to_owned(),
+        [] as [&str; 0],
+        Some(&dependencies_manifest),
+    );
+
+    println!("Size {dl} - {inst}");
+
     let home = env::var("HOME").unwrap();
 
     let mut downloader = Downloader::builder()

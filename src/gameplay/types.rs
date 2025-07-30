@@ -43,7 +43,7 @@ pub struct UrlTask {
     #[serde(deserialize_with = "languages::serde_language", default)]
     pub languages: Vec<String>,
     pub name: Option<String>,
-
+    #[serde(alias = "url")]
     pub link: String,
 }
 
