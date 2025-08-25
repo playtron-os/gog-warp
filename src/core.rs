@@ -12,6 +12,7 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
 #[derive(Clone)]
@@ -52,7 +53,11 @@ impl Clone for Core {
 
 impl Core {
     pub fn new() -> Self {
-        let client = reqwest::Client::builder().no_gzip().build().unwrap();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .no_gzip()
+            .build()
+            .unwrap();
         let (tx, rx) = tokio::sync::broadcast::channel::<CoreEvent>(128);
 
         Self {
