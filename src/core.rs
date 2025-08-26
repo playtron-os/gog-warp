@@ -54,7 +54,8 @@ impl Clone for Core {
 impl Core {
     pub fn new() -> Self {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(10))
             .no_gzip()
             .build()
             .unwrap();
