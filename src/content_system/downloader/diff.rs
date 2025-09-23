@@ -168,7 +168,8 @@ pub fn diff(
     for file_list in new_entries {
         let mut new_list = FileList::new(file_list.product_id, Vec::new());
         new_list.is_dependency = file_list.is_dependency;
-        let mut needs_sfc = false;
+        new_list.is_global_dependency = file_list.is_global_dependency;
+        let mut needs_sfc: bool = false;
 
         for entry in file_list.files {
             if final_download.remove(&entry.path().to_lowercase()) {
