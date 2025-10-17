@@ -26,7 +26,9 @@ where
     let mut directory = fs::read_dir(game_directory).await.map_err(io_error)?;
     let mut infos = Vec::new();
     while let Some(entry) = directory.next_entry().await.map_err(io_error)? {
-        let file_name = entry.file_name().into_string().unwrap();
+        let Ok(file_name) = entry.file_name().into_string() else {
+            continue;
+        };
         if file_name.starts_with("goggame-") && file_name.ends_with(".info") {
             let mut file = fs::OpenOptions::new()
                 .read(true)
