@@ -713,9 +713,11 @@ impl Downloader {
                 allocated_files += 1;
             }
             let allocation_progress = allocated_files as f32 / report.number_of_files as f32;
-            let _ = self
-                .progress_channel_sender
-                .try_send(DownloadState::Allocating(allocation_progress));
+            if !self.verify {
+                let _ = self
+                    .progress_channel_sender
+                    .try_send(DownloadState::Allocating(allocation_progress));
+            }
 
             let mut secure_links = secure_links.lock().await;
             let product_id = file_list.product_id();
