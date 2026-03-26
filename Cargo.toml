@@ -25,7 +25,7 @@ tokio-util = { version = "0.7.11", features = ["io", "compat"] }
 url = "2.5.0"
 
 [build-dependencies]
-bindgen = "0.69.4"
+bindgen = "0.72"
 cc = "1.0.94"
 rand = "0.8.5"
 

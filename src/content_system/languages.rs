@@ -515,13 +515,12 @@ static LANGUAGES: [Language<'static>; 84] = [
     },
 ];
 
-pub fn get_language(query: &str) -> Option<Language> {
+pub fn get_language(query: &str) -> Option<&Language<'static>> {
     LANGUAGES
         .iter()
         .find(|lang| {
             lang.code == query || lang.deprecated_codes.contains(&query) || lang.name == query
         })
-        .cloned()
 }
 
 pub(crate) fn serde_language<'de, D>(d: D) -> Result<Vec<String>, D::Error>
